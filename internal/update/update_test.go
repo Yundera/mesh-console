@@ -18,6 +18,7 @@ func TestParseRepo(t *testing.T) {
 		"https://github.com/yundera/mesh-router-template-root/archive/refs/heads/main.tar.gz": {Repo{"yundera", "mesh-router-template-root", "main"}, true},
 		"https://github.com/me/fork/archive/refs/heads/feat/x.tar.gz":                         {Repo{"me", "fork", "feat/x"}, true},
 		"https://codeload.github.com/yundera/mesh-router-template-root/tar.gz/refs/heads/dev": {Repo{"yundera", "mesh-router-template-root", "dev"}, true},
+		"https://github.com/Yundera/template-root/archive/refs/heads/main.zip":                {Repo{"Yundera", "template-root", "main"}, true},
 		"file:///tmp/tree.tar.gz":         {Repo{}, false},
 		"https://example.com/tree.tar.gz": {Repo{}, false},
 	}

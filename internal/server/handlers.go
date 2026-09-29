@@ -20,10 +20,6 @@ import (
 	"github.com/yundera/mesh-console/internal/update"
 )
 
-// platformProjects are the compose projects the console reports on: the mesh
-// stack and the auxiliary stacks the template deploys beside it.
-var platformProjects = []string{"mesh", "maison", "mesh-console"}
-
 // ---- overview ------------------------------------------------------------
 
 type links struct {
@@ -155,7 +151,7 @@ func (s *Server) handleStack(w http.ResponseWriter, r *http.Request) {
 	}
 	var out []stackEntry
 	for _, c := range all {
-		if !contains(platformProjects, c.Project) {
+		if !contains(s.cfg.PlatformProjects, c.Project) {
 			continue
 		}
 		e := stackEntry{Container: c, Declared: declared[c.Name]}
@@ -214,7 +210,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateRun(w http.ResponseWriter, r *http.Request) {
-	verb, err := hostverb.SelfCheck(s.cfg.MeshHostRoot)
+	verb, err := hostverb.SelfCheck(s.cfg.MeshHostRoot, s.cfg.SelfCheckScript)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -233,7 +229,7 @@ func (s *Server) handleUpdateRun(w http.ResponseWriter, r *http.Request) {
 const stallAfter = 15 * time.Minute
 
 func (s *Server) handleSelfCheck(w http.ResponseWriter, r *http.Request) {
-	logPath := filepath.Join(s.cfg.MeshDir, "log", "mesh.log")
+	logPath := s.logFile()
 	n, _ := strconv.Atoi(r.URL.Query().Get("lines"))
 	if n <= 0 || n > 1000 {
 		n = 200
@@ -298,6 +294,7 @@ func (s *Server) handleDomain(w http.ResponseWriter, r *http.Request) {
 		"defaultHost": orDefault(env.Get("DEFAULT_SERVICE_HOST"), "maison"),
 		"defaultPort": orDefault(env.Get("DEFAULT_SERVICE_PORT"), "80"),
 		"network":     appNet,
+		"editable":    s.cfg.DefaultAppEdit,
 	}
 	if s.docker != nil {
 		all, err := s.docker.List(r.Context())
@@ -328,6 +325,10 @@ func (s *Server) handleDomain(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetDefaultApp(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.DefaultAppEdit {
+		writeError(w, http.StatusForbidden, "changing the default app is disabled on this box (DEFAULT_APP_EDIT=false)")
+		return
+	}
 	var body struct {
 		Host string `json:"host"`
 		Port int    `json:"port"`
@@ -409,6 +410,13 @@ func (s *Server) verbError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusBadGateway, err.Error())
+}
+
+func (s *Server) logFile() string {
+	if s.cfg.LogFile != "" {
+		return s.cfg.LogFile
+	}
+	return filepath.Join(s.cfg.MeshDir, "log", "mesh.log")
 }
 
 func contains(list []string, v string) bool {

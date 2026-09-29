@@ -5,12 +5,16 @@
 // and the markers this package keys on are:
 //
 //	=== Mesh self-check starting ===            (also "starting (display) ===")
+//	=== Self-check starting ===                 (Yundera template-root's wording)
 //	=== [ts] name.sh : starting ===
 //	=== [ts] name.sh : success (12s) ===
 //	=== [ts] name.sh : failed (exit code: 1, 12s) ===
 //	=== [ts] name.sh : not found ===            (display mode only)
 //	=== Mesh self-check completed successfully ===
 //	=== Mesh self-check completed with failures ===
+//
+// The step lines come from the same log.sh in both templates; only the run
+// start/end wording differs, so both are accepted.
 package selfcheck
 
 import (
@@ -64,8 +68,8 @@ type Run struct {
 var (
 	lineRe  = regexp.MustCompile(`^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] \[([A-Z]+)\] (.*)$`)
 	stepRe  = regexp.MustCompile(`^=== \[[^\]]+\] (\S+) : (starting|success \((\d+)s\)|failed \(exit code: (\d+), (\d+)s\)|not found) ===$`)
-	startRe = regexp.MustCompile(`^=== Mesh self-check starting`)
-	doneRe  = regexp.MustCompile(`^=== Mesh self-check completed (successfully|with failures) ===$`)
+	startRe = regexp.MustCompile(`^=== (?:Mesh self|Self)-check starting`)
+	doneRe  = regexp.MustCompile(`^=== (?:Mesh self|Self)-check completed (successfully|with failures) ===$`)
 )
 
 // Parse reads a log (or its tail) and returns runs oldest first. A partial

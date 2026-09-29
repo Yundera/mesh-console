@@ -63,6 +63,19 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// Yundera template-root words the run markers without "Mesh".
+func TestParseYunderaWording(t *testing.T) {
+	log := `[2026-09-29 03:00:00] [INFO] === Self-check starting ===
+[2026-09-29 03:00:00] [INFO] === [2026-09-29 03:00:00] ensure-maison-stack.sh : starting ===
+[2026-09-29 03:00:03] [SUCCESS] === [2026-09-29 03:00:03] ensure-maison-stack.sh : success (3s) ===
+[2026-09-29 03:00:04] [INFO] === Self-check completed successfully ===
+`
+	runs, _ := Parse(strings.NewReader(log), time.UTC)
+	if len(runs) != 1 || runs[0].Status != RunSuccess || len(runs[0].Steps) != 1 {
+		t.Fatalf("runs = %+v", runs)
+	}
+}
+
 func TestParseSuccess(t *testing.T) {
 	log := `[2026-09-29 03:00:00] [INFO] === Mesh self-check starting ===
 [2026-09-29 03:00:00] [ERROR] === [2026-09-29 03:00:00] ensure-foo.sh : not found ===

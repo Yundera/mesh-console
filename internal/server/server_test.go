@@ -74,7 +74,7 @@ func TestDevIdentityGuard(t *testing.T) {
 }
 
 func TestCSRFGuardAndOverview(t *testing.T) {
-	h := testServer(t, config.Config{DevIdentity: "dev", Env: "development", MeshDir: meshFixture(t), MeshHostRoot: "/DATA/AppData/mesh"})
+	h := testServer(t, config.Config{DevIdentity: "dev", Env: "development", MeshDir: meshFixture(t), MeshHostRoot: "/DATA/AppData/mesh", DefaultAppEdit: true})
 
 	if rec := do(h, http.MethodPost, "/api/update/run", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("POST without header = %d, want 403", rec.Code)
@@ -92,6 +92,14 @@ func TestCSRFGuardAndOverview(t *testing.T) {
 	rec = do(h, http.MethodPost, "/api/domain/default-app", map[string]string{"X-Mesh-Console": "1"})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("default-app with empty body = %d, want 400", rec.Code)
+	}
+}
+
+func TestDefaultAppEditDisabled(t *testing.T) {
+	h := testServer(t, config.Config{DevIdentity: "dev", Env: "development", MeshDir: meshFixture(t), MeshHostRoot: "/DATA/AppData/mesh"})
+	rec := do(h, http.MethodPost, "/api/domain/default-app", map[string]string{"X-Mesh-Console": "1"})
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "DEFAULT_APP_EDIT") {
+		t.Fatalf("disabled edit = %d %s", rec.Code, rec.Body)
 	}
 }
 

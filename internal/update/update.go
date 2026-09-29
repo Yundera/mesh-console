@@ -65,8 +65,9 @@ type Repo struct {
 }
 
 var (
-	// https://github.com/<o>/<r>/archive/refs/heads/<b>.tar.gz
-	archiveRe = regexp.MustCompile(`^https://github\.com/([^/]+)/([^/]+)/archive/refs/heads/(.+)\.tar\.gz$`)
+	// https://github.com/<o>/<r>/archive/refs/heads/<b>.tar.gz (or .zip — Yundera
+	// template-root's UPDATE_URL form)
+	archiveRe = regexp.MustCompile(`^https://github\.com/([^/]+)/([^/]+)/archive/refs/heads/(.+)\.(?:tar\.gz|zip)$`)
 	// https://codeload.github.com/<o>/<r>/tar.gz/refs/heads/<b>
 	codeloadRe = regexp.MustCompile(`^https://codeload\.github\.com/([^/]+)/([^/]+)/tar\.gz/(?:refs/heads/)?(.+)$`)
 )

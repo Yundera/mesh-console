@@ -41,6 +41,21 @@ type Config struct {
 	// local routing evidence.
 	TunnelContainer string
 	CaddyHost       string
+
+	// LogFile is the self-check log as mounted here. Empty means
+	// ${MeshDir}/log/mesh.log (FOSS mesh template); a Yundera PCS writes
+	// log/yundera.log instead.
+	LogFile string
+	// SelfCheckScript is the HOST path of the self-check. Empty means
+	// ${MeshHostRoot}/scripts/self-check.sh.
+	SelfCheckScript string
+	// DefaultAppEdit enables the Domain page's default-app editor. Its verb
+	// writes DEFAULT_SERVICE_* into ${MeshHostRoot}/.env, which is right for
+	// the FOSS template and wrong on a Yundera PCS (there .env is generated
+	// from .pcs.env), so a PCS deployment turns it off.
+	DefaultAppEdit bool
+	// PlatformProjects are the compose projects listed as platform containers.
+	PlatformProjects []string
 }
 
 func FromEnv() Config {
@@ -56,7 +71,29 @@ func FromEnv() Config {
 		RunnerImage:       strings.TrimSpace(os.Getenv("RUNNER_IMAGE")),
 		TunnelContainer:   def(os.Getenv("TUNNEL_CONTAINER"), "mesh-router-tunnel"),
 		CaddyHost:         def(os.Getenv("CADDY_HOST"), "mesh-router-caddy"),
+		LogFile:           strings.TrimSpace(os.Getenv("LOG_FILE")),
+		SelfCheckScript:   strings.TrimSpace(os.Getenv("SELF_CHECK_SCRIPT")),
+		DefaultAppEdit:    !isFalse(os.Getenv("DEFAULT_APP_EDIT")),
+		PlatformProjects:  csv(def(os.Getenv("PLATFORM_PROJECTS"), "mesh,maison,mesh-console")),
 	}
+}
+
+func isFalse(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "off", "no", "disabled":
+		return true
+	}
+	return false
+}
+
+func csv(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func def(v, fallback string) string {

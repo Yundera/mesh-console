@@ -100,7 +100,12 @@
       this box. Saving rewrites the mesh <code>.env</code> and recreates the mesh stack; public URLs blink for a few
       seconds.
     </p>
-    {#if info}
+    {#if info && !info.editable}
+      <p class="small">
+        Currently <code>{info.defaultHost}:{info.defaultPort}</code>. Changing it from here is disabled on this box
+        (<code>DEFAULT_APP_EDIT=false</code>) — its platform keeps this setting elsewhere.
+      </p>
+    {:else if info}
       {#if info.candidatesError}<p class="error">{info.candidatesError}</p>{/if}
       <div class="form">
         <label>

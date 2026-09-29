@@ -26,13 +26,23 @@ type Verb struct {
 // SelfCheck runs the mesh self-check — the same thing the nightly cron runs,
 // which syncs the template (when MESH_AUTO_UPDATE allows), pulls and brings the
 // stacks up. Its own flock makes a concurrent run exit 0 immediately.
-func SelfCheck(hostRoot string) (Verb, error) {
+//
+// script overrides the default ${hostRoot}/scripts/self-check.sh (a Yundera PCS
+// runs template/scripts/self-check.sh). It comes from deployment config, never
+// from a request, and is validated like the root anyway.
+func SelfCheck(hostRoot, script string) (Verb, error) {
 	if err := checkRoot(hostRoot); err != nil {
 		return Verb{}, err
 	}
+	if script == "" {
+		script = path.Join(hostRoot, "scripts", "self-check.sh")
+	}
+	if err := checkRoot(script); err != nil {
+		return Verb{}, errors.New("invalid SELF_CHECK_SCRIPT")
+	}
 	return Verb{
 		Name:     "selfcheck",
-		Argv:     []string{"bash", path.Join(hostRoot, "scripts", "self-check.sh")},
+		Argv:     []string{"bash", script},
 		Detached: true,
 	}, nil
 }

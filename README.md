@@ -92,5 +92,5 @@ machine you develop on.
 ## Release
 
 GitHub Actions publishes `ghcr.io/yundera/mesh-console` (amd64 + arm64) on pushes to
-`main` and on `v*` tags. Bump by tagging (`v0.1.0` → `:0.1.0`), then move the pin in the
+`main` and on `v*` tags. Bump by tagging (`v1.0.1` → `:1.0.1`), then move the pin in the
 template's `stacks/mesh-console/docker-compose.yml`.

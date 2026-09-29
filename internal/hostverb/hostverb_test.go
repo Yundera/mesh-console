@@ -6,7 +6,7 @@ import (
 )
 
 func TestSelfCheck(t *testing.T) {
-	v, err := SelfCheck("/DATA/AppData/mesh")
+	v, err := SelfCheck("/DATA/AppData/mesh", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -14,9 +14,16 @@ func TestSelfCheck(t *testing.T) {
 		t.Fatalf("verb = %+v", v)
 	}
 	for _, bad := range []string{"", "/", "relative", "/DATA/../etc", "/DATA/$(id)", "/DATA/a b"} {
-		if _, err := SelfCheck(bad); err == nil {
+		if _, err := SelfCheck(bad, ""); err == nil {
 			t.Errorf("root %q accepted", bad)
 		}
+	}
+	v, err = SelfCheck("/DATA/AppData/yundera", "/DATA/AppData/yundera/template/scripts/self-check.sh")
+	if err != nil || v.Argv[1] != "/DATA/AppData/yundera/template/scripts/self-check.sh" {
+		t.Fatalf("override: %+v %v", v, err)
+	}
+	if _, err := SelfCheck("/DATA/AppData/mesh", "/x;rm -rf /"); err == nil {
+		t.Error("bad script accepted")
 	}
 }
 

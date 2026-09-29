@@ -149,6 +149,7 @@ export interface DomainInfo {
   defaultHost: string
   defaultPort: string
   network: string
+  editable: boolean
   candidates?: { name: string; project?: string; state: string; ports: number[] | null; onPcs: boolean }[]
   candidatesError?: string
 }
