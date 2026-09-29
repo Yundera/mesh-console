@@ -23,7 +23,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # 3) Runtime. The same image is also the host-verb runner (internal/dockerx
 #    RunOnHost), which is the only reason nsenter is here: util-linux-misc
 #    provides it. tzdata so the self-check log's local timestamps parse in the
-#    host's TZ (passed in by the template).
+#    host's zone (the template mounts /etc/localtime).
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates tzdata util-linux-misc
 COPY --from=backend /mesh-console /mesh-console

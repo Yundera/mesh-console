@@ -57,11 +57,12 @@ browser ─► mesh-router-caddy ─► mesh-console (AppShield gate, OIDC_REQUI
 | `RUNNER_IMAGE` | — | Override that lookup |
 | `TUNNEL_CONTAINER` | `mesh-router-tunnel` | Where `wg show` runs |
 | `CADDY_HOST` | `mesh-router-caddy` | Target of the root-domain probe |
-| `TZ` | `UTC` | Host timezone; the self-check log is written in local time |
+| `TZ` | host `/etc/localtime` | Timezone the self-check log (written in host local time) is parsed in. The template bind-mounts `/etc/localtime` instead of setting it |
 | `LISTEN_ADDR` | `:8080` | |
 | `MESH_CONSOLE_ENV`, `DEV_IDENTITY` | `production`, — | `DEV_IDENTITY=<name>` skips auth, **only** when `MESH_CONSOLE_ENV=development` and no secret is set |
 
-The template's `stacks/mesh-console/docker-compose.yml` is the reference deployment.
+The template's `docker-compose.yml` (the `mesh-console` and `mesh-console-app` services of
+the mesh stack) is the reference deployment.
 
 ## Development
 
@@ -93,4 +94,4 @@ machine you develop on.
 
 GitHub Actions publishes `ghcr.io/yundera/mesh-console` (amd64 + arm64) on pushes to
 `main` and on `v*` tags. Bump by tagging (`v1.0.1` → `:1.0.1`), then move the pin in the
-template's `stacks/mesh-console/docker-compose.yml`.
+template's `docker-compose.yml`.

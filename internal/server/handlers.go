@@ -304,7 +304,10 @@ func (s *Server) handleDomain(w http.ResponseWriter, r *http.Request) {
 			var cands []candidate
 			for _, c := range all {
 				// The console, its gate and the runner are never a sensible root app.
-				if c.Project == "mesh-console" || c.Name == dockerx.RunnerName {
+				// Matched by name: they are services of the `mesh` project, not a
+				// project of their own (the project check covers pre-merge boxes).
+				if c.Project == "mesh-console" || c.Name == "mesh-console" ||
+					c.Name == s.cfg.SelfContainer || c.Name == dockerx.RunnerName {
 					continue
 				}
 				ports := c.Ports
