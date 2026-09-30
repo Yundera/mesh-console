@@ -61,7 +61,9 @@
       const body = e instanceof ApiError ? (e.body as { result?: { output?: string } } | undefined) : undefined
       result = {
         ok: false,
-        message: e instanceof ApiError && e.status === 409 ? 'Another host action is running — try again in a moment.' : (e as Error).message,
+        // 409 is "busy" — another host action, or a self-check holding the lock;
+        // the server says which.
+        message: (e as Error).message,
         output: body?.result?.output,
       }
     } finally {
@@ -97,13 +99,13 @@
   <Card title="Default application">
     <p class="muted small">
       The app answering on <strong>{info?.domain ?? 'your domain'}</strong> itself and on any custom domain pointed at
-      this box. Saving rewrites the mesh <code>.env</code> and recreates the mesh stack; public URLs blink for a few
-      seconds.
+      this box. Saving hands it to the box's template, which stores it and recreates the router and the login
+      registrar; public URLs blink for a few seconds.
     </p>
     {#if info && !info.editable}
       <p class="small">
-        Currently <code>{info.defaultHost}:{info.defaultPort}</code>. Changing it from here is disabled on this box
-        (<code>DEFAULT_APP_EDIT=false</code>) — its platform keeps this setting elsewhere.
+        Currently <code>{info.defaultHost}:{info.defaultPort}</code>. Changing it from here is {info.editBlocked ??
+          'disabled on this box'}.
       </p>
     {:else if info}
       {#if info.candidatesError}<p class="error">{info.candidatesError}</p>{/if}

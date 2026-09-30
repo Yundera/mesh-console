@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/yundera/mesh-console/internal/backend"
@@ -254,7 +256,7 @@ func (s *Server) gatherUpdate(ctx context.Context, env meshenv.Env, refresh bool
 }
 
 func (s *Server) handleUpdateRun(w http.ResponseWriter, r *http.Request) {
-	verb, err := hostverb.SelfCheck(s.cfg.MeshHostRoot, s.cfg.SelfCheckScript)
+	verb, err := hostverb.SelfCheck(s.cfg.Scripts(), s.cfg.SelfCheckScript)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -329,8 +331,8 @@ func (s *Server) handleDomain(w http.ResponseWriter, r *http.Request) {
 		"defaultHost": orDefault(env.Get("DEFAULT_SERVICE_HOST"), "maison"),
 		"defaultPort": orDefault(env.Get("DEFAULT_SERVICE_PORT"), "80"),
 		"network":     appNet,
-		"editable":    s.cfg.DefaultAppEdit,
 	}
+	out["editable"], out["editBlocked"] = s.defaultAppEditable()
 	if s.docker != nil {
 		all, err := s.docker.List(r.Context())
 		if err != nil {
@@ -362,9 +364,30 @@ func (s *Server) handleDomain(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) handleSetDefaultApp(w http.ResponseWriter, r *http.Request) {
+// defaultAppEditable says whether the editor can work on this box, and why not.
+//
+// Besides the DEFAULT_APP_EDIT opt-out, it needs the template's own action
+// (hostverb.SetDefaultAppTool). The console sees the template through its /mesh
+// mount, so the tool is looked for there when the scripts directory lies under
+// the mounted root; a layout the mount does not cover is assumed to have it, and
+// the verb reports otherwise. Checked per request: a template sync can add it.
+func (s *Server) defaultAppEditable() (bool, string) {
 	if !s.cfg.DefaultAppEdit {
-		writeError(w, http.StatusForbidden, "changing the default app is disabled on this box (DEFAULT_APP_EDIT=false)")
+		return false, "disabled on this box (DEFAULT_APP_EDIT=false)"
+	}
+	rel, err := filepath.Rel(s.cfg.MeshHostRoot, s.cfg.Scripts())
+	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return true, ""
+	}
+	if _, err := os.Stat(filepath.Join(s.cfg.MeshDir, rel, hostverb.SetDefaultAppTool)); err != nil {
+		return false, "this box's template does not ship " + hostverb.SetDefaultAppTool + " yet - it arrives with a template update"
+	}
+	return true, ""
+}
+
+func (s *Server) handleSetDefaultApp(w http.ResponseWriter, r *http.Request) {
+	if ok, why := s.defaultAppEditable(); !ok {
+		writeError(w, http.StatusForbidden, "changing the default app is "+why)
 		return
 	}
 	var body struct {
@@ -375,7 +398,7 @@ func (s *Server) handleSetDefaultApp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	verb, err := hostverb.SetDefaultApp(s.cfg.MeshHostRoot, body.Host, body.Port)
+	verb, err := hostverb.SetDefaultApp(s.cfg.Scripts(), body.Host, body.Port)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -383,6 +406,10 @@ func (s *Server) handleSetDefaultApp(w http.ResponseWriter, r *http.Request) {
 	res, err := s.runVerb(r.Context(), verb)
 	if err != nil {
 		s.verbError(w, err)
+		return
+	}
+	if res.ExitCode == hostverb.ExitBusy {
+		writeError(w, http.StatusConflict, "a self-check is running on this box - try again once it has finished")
 		return
 	}
 	out := map[string]any{"result": res}

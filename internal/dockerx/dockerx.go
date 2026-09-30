@@ -4,10 +4,12 @@
 package dockerx
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,6 +46,9 @@ type Container struct {
 	// Ports are the container's exposed/published private ports, the candidates
 	// for a reverse_proxy upstream.
 	Ports []int `json:"ports"`
+	// Labels are kept server-side only (the Certificates page reads the caddy
+	// ones); they can carry app configuration, so they are never serialized.
+	Labels map[string]string `json:"-"`
 }
 
 const (
@@ -72,6 +77,7 @@ func (c *Client) List(ctx context.Context) ([]Container, error) {
 			Status:  r.Status,
 			Created: time.Unix(r.Created, 0),
 			Health:  healthFromStatus(r.Status),
+			Labels:  r.Labels,
 		}
 		if r.NetworkSettings != nil {
 			for n := range r.NetworkSettings.Networks {
@@ -161,6 +167,30 @@ func (c *Client) Exec(ctx context.Context, name string, argv []string) (string, 
 		return out.String(), fmt.Errorf("exit %d: %s", insp.ExitCode, strings.TrimSpace(errBuf.String()))
 	}
 	return out.String(), nil
+}
+
+// ScanLogs streams a container's stdout+stderr since the given age, one line
+// at a time, without buffering the whole log (Caddy's can be large).
+func (c *Client) ScanLogs(ctx context.Context, name string, since time.Duration, fn func(line string)) error {
+	rc, err := c.cli.ContainerLogs(ctx, name, container.LogsOptions{
+		ShowStdout: true, ShowStderr: true, Since: strconv.FormatInt(time.Now().Add(-since).Unix(), 10),
+	})
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	pr, pw := io.Pipe()
+	go func() {
+		_, err := stdcopy.StdCopy(pw, pw, rc)
+		pw.CloseWithError(err)
+	}()
+	defer pr.Close()
+	sc := bufio.NewScanner(pr)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	for sc.Scan() {
+		fn(sc.Text())
+	}
+	return sc.Err()
 }
 
 // Handshake is one WireGuard peer's last handshake.

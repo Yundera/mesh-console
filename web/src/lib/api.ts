@@ -150,6 +150,8 @@ export interface DomainInfo {
   defaultPort: string
   network: string
   editable: boolean
+  /** Why the editor is read-only, when it is. */
+  editBlocked?: string
   candidates?: { name: string; project?: string; state: string; ports: number[] | null; onPcs: boolean }[]
   candidatesError?: string
 }
@@ -216,4 +218,29 @@ export interface MailInfo {
   relayState?: string
   stats?: MailStats
   statsError?: string
+}
+
+export type CertStatus = 'letsencrypt' | 'fallback' | 'unreachable'
+export type Renewal = 'ok' | 'overdue' | 'expired'
+
+export interface CertRow {
+  domain: string
+  sources: string[]
+  status: CertStatus
+  issuer?: string
+  notBefore?: string
+  notAfter?: string
+  renewal?: Renewal
+  error?: string
+  reason?: string
+  reasonDetail?: string
+}
+
+export interface Certificates {
+  snapshotAt: string
+  gateway?: { subject: string; dnsNames: string[]; notBefore: string; notAfter: string; issuer: string; renewal: Renewal }
+  gatewayError?: string
+  certs?: CertRow[]
+  error?: string
+  logError?: string
 }

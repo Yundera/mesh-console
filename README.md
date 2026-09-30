@@ -10,6 +10,7 @@ Served at `mesh-console-${DOMAIN}`, behind an AppShield gate, admins only.
 | **Email** | Where app mail goes and the address it is sent as (`<app>.<domainName>@<serverDomain>`); SMTP settings for apps; activity (sent / failed / not delivered, per app, recent) read from the mail relay | **Send a test email** — always to the account `EMAIL`, at most one a minute |
 | **Update** | Installed template commit vs latest on the `UPDATE_URL` branch; auto-update / cron settings; last self-check runs step by step; raw log | **Update now** = run the self-check |
 | **Domain** | Domain, sslip.io / nip.io fallbacks, root-domain default app, custom-domain DNS help | Change the default app (container + port) |
+| **Certificates** | The mesh certificate (box domain + nip.io) and, for every sslip.io address Caddy serves (running containers' `caddy`/`caddy_N` labels + the root sslip.io block), the certificate it actually presents — Let's Encrypt, fallback (internal CA) or none — from a TLS handshake with Caddy over `pcs`. Expiry is judged against each cert's own lifetime. For a non-Let's-Encrypt address, the reason is read from Caddy's last 14 days of log. On demand only (`GET /api/certificates`), never polled | **Check again** |
 | **Diagnostics** | Links (incl. sslip.io); routing state **Direct / Tunnel / Offline** with the routes the backend holds; tunnel handshake age; mesh certificate expiry; root-domain probe; platform containers and image drift | — |
 
 ## How it works
@@ -32,9 +33,13 @@ browser ─► mesh-router-caddy ─► mesh-console (AppShield gate, OIDC_REQUI
   `X-Auth-Request-*` headers are ignored: any container on `pcs` can reach the app
   directly. No secret configured → every request is refused. State-changing requests
   also need an `X-Mesh-Console: 1` header (CSRF).
-- **Host actions.** There are exactly two (`internal/hostverb`): run
-  `scripts/self-check.sh`, and set `DEFAULT_SERVICE_HOST`/`PORT` through the template's
-  `env-file-manager.sh` then `docker compose up -d` the mesh stack. Each runs as a
+- **Host actions.** There are exactly two (`internal/hostverb`), and both call the
+  template's own scripts, from its scripts directory (`TEMPLATE_SCRIPTS`): run
+  `self-check.sh`, and `tools/set-default-app.sh <host> <port>`. The second is a
+  **contract** both templates implement: the template knows where the setting is stored
+  and what to recreate (the mesh stack's Caddy and the auth stack's registrar), the console
+  only knows the path. Exit 75 means a self-check holds the lock (→ HTTP 409). A template
+  without the tool gets a read-only editor that says why. Each runs as a
   one-shot container `mesh-console-runner` created from this same image with
   `--privileged --pid=host` and `nsenter -t 1 -m -u -i -n -p`, i.e. in the host's
   namespaces. Fixed argv, user input only in validated positional arguments, at most one
@@ -59,11 +64,16 @@ browser ─► mesh-router-caddy ─► mesh-console (AppShield gate, OIDC_REQUI
 | `IDENTITY_ASSERTION_SECRET` | — | Required. Same value as the gate's |
 | `IDENTITY_ASSERTION_AUDIENCE` | `mesh-console` | Must equal the gate's APP_NAME (its hostname) |
 | `MESH_DIR` | `/mesh` | Mesh root as mounted here (read-only) |
-| `MESH_HOST_ROOT` | `/DATA/AppData/mesh` | Mesh root as the host sees it — host actions use this |
+| `MESH_HOST_ROOT` | `/DATA/AppData/mesh` | `MESH_DIR` as the host sees it |
+| `TEMPLATE_SCRIPTS` | `$MESH_HOST_ROOT/scripts` | The template's scripts directory, as the host sees it — the host actions run `self-check.sh` and `tools/set-default-app.sh` from here. A Yundera PCS: `/DATA/AppData/yundera/template/scripts` |
+| `LOG_FILE` | `$MESH_DIR/log/mesh.log` | The self-check log as mounted here. A Yundera PCS: `/mesh/log/yundera.log` |
+| `DEFAULT_APP_EDIT` | on | `false` turns the default-app editor off. It is also off, with the reason shown, when the template has no `tools/set-default-app.sh` |
+| `PLATFORM_PROJECTS` | `mesh,maison,mesh-console` | Compose projects listed as platform containers |
+| `SELF_CHECK_SCRIPT` | — | Deprecated override of `$TEMPLATE_SCRIPTS/self-check.sh` |
 | `SELF_CONTAINER` | `mesh-console-app` | Used to find the image the runner is created from |
 | `RUNNER_IMAGE` | — | Override that lookup |
 | `TUNNEL_CONTAINER` | `mesh-router-tunnel` | Where `wg show` runs |
-| `CADDY_HOST` | `mesh-router-caddy` | Target of the root-domain probe |
+| `CADDY_HOST` | `mesh-router-caddy` | Caddy's container (= hostname on `pcs`): target of the root-domain probe and the certificate handshakes, and whose log explains failed issuances |
 | `MAIL_CONTAINER` | `smtp` | The mail relay whose activity the Email page shows |
 | `SMTP_ADDR` | `smtp:587` | Where the test email is sent |
 | `TZ` | host `/etc/localtime` | Timezone the self-check log (written in host local time) is parsed in. The template bind-mounts `/etc/localtime` instead of setting it |

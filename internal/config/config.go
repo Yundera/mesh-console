@@ -3,6 +3,7 @@ package config
 
 import (
 	"os"
+	"path"
 	"strings"
 )
 
@@ -46,13 +47,19 @@ type Config struct {
 	// ${MeshDir}/log/mesh.log (FOSS mesh template); a Yundera PCS writes
 	// log/yundera.log instead.
 	LogFile string
-	// SelfCheckScript is the HOST path of the self-check. Empty means
-	// ${MeshHostRoot}/scripts/self-check.sh.
+	// TemplateScripts is the HOST path of the template's scripts directory —
+	// where self-check.sh and the tools/ the console calls live. Empty means
+	// ${MeshHostRoot}/scripts (the mesh template); a Yundera PCS keeps them in
+	// template/scripts. See Scripts().
+	TemplateScripts string
+	// SelfCheckScript overrides ${TemplateScripts}/self-check.sh. Deprecated:
+	// kept so a deployment that set it before TEMPLATE_SCRIPTS keeps working.
 	SelfCheckScript string
-	// DefaultAppEdit enables the Domain page's default-app editor. Its verb
-	// writes DEFAULT_SERVICE_* into ${MeshHostRoot}/.env, which is right for
-	// the FOSS template and wrong on a Yundera PCS (there .env is generated
-	// from .pcs.env), so a PCS deployment turns it off.
+	// DefaultAppEdit is an opt-out for the Domain page's default-app editor.
+	// The editor also needs the template to ship tools/set-default-app.sh — the
+	// template's own action, which knows where the setting is stored and what to
+	// recreate — and turns itself off (read-only, with the reason) when it does
+	// not.
 	DefaultAppEdit bool
 	// PlatformProjects are the compose projects listed as platform containers.
 	PlatformProjects []string
@@ -77,6 +84,7 @@ func FromEnv() Config {
 		TunnelContainer:   def(os.Getenv("TUNNEL_CONTAINER"), "mesh-router-tunnel"),
 		CaddyHost:         def(os.Getenv("CADDY_HOST"), "mesh-router-caddy"),
 		LogFile:           strings.TrimSpace(os.Getenv("LOG_FILE")),
+		TemplateScripts:   strings.TrimSpace(os.Getenv("TEMPLATE_SCRIPTS")),
 		SelfCheckScript:   strings.TrimSpace(os.Getenv("SELF_CHECK_SCRIPT")),
 		DefaultAppEdit:    !isFalse(os.Getenv("DEFAULT_APP_EDIT")),
 		PlatformProjects:  csv(def(os.Getenv("PLATFORM_PROJECTS"), "mesh,maison,mesh-console")),
@@ -108,4 +116,12 @@ func def(v, fallback string) string {
 		return fallback
 	}
 	return strings.TrimSpace(v)
+}
+
+// Scripts is the template's scripts directory as the HOST sees it.
+func (c Config) Scripts() string {
+	if c.TemplateScripts != "" {
+		return c.TemplateScripts
+	}
+	return path.Join(c.MeshHostRoot, "scripts")
 }

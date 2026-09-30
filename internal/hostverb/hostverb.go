@@ -4,7 +4,8 @@
 // argument, and nothing is interpolated into a shell string.
 //
 // The argv runs inside the host's namespaces (see dockerx.Runner), so paths are
-// HOST paths — MeshHostRoot, not the /mesh mount this container reads.
+// HOST paths — MeshHostRoot / TemplateScripts, not the /mesh mount this
+// container reads.
 package hostverb
 
 import (
@@ -27,15 +28,15 @@ type Verb struct {
 // which syncs the template (when MESH_AUTO_UPDATE allows), pulls and brings the
 // stacks up. Its own flock makes a concurrent run exit 0 immediately.
 //
-// script overrides the default ${hostRoot}/scripts/self-check.sh (a Yundera PCS
-// runs template/scripts/self-check.sh). It comes from deployment config, never
-// from a request, and is validated like the root anyway.
-func SelfCheck(hostRoot, script string) (Verb, error) {
-	if err := checkRoot(hostRoot); err != nil {
+// scripts is the template's scripts directory (config.Scripts); script, when
+// set, overrides ${scripts}/self-check.sh. Both come from deployment config,
+// never from a request, and are validated anyway.
+func SelfCheck(scripts, script string) (Verb, error) {
+	if err := checkRoot(scripts); err != nil {
 		return Verb{}, err
 	}
 	if script == "" {
-		script = path.Join(hostRoot, "scripts", "self-check.sh")
+		script = path.Join(scripts, "self-check.sh")
 	}
 	if err := checkRoot(script); err != nil {
 		return Verb{}, errors.New("invalid SELF_CHECK_SCRIPT")
@@ -51,23 +52,23 @@ func SelfCheck(hostRoot, script string) (Verb, error) {
 // Docker's own name charset, which also rules out every shell metacharacter.
 var hostRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 
-// setDefaultAppScript is fixed text; the values arrive as $1..$3. It writes both
-// keys through the template's own env-file-manager.sh (atomic, keeps mode and
-// owner), then recreates the mesh stack so mesh-router-caddy (root-domain routes
-// + catch-all) and auth-registrar (ROOT_CLIENT_ID) pick the new value up —
-// both read DEFAULT_SERVICE_HOST, which is exactly why it is one setting.
-const setDefaultAppScript = `set -eu
-root="$1"; host="$2"; port="$3"
-bash "$root/scripts/tools/env-file-manager.sh" set DEFAULT_SERVICE_HOST "$host" "$root/.env"
-bash "$root/scripts/tools/env-file-manager.sh" set DEFAULT_SERVICE_PORT "$port" "$root/.env"
-cd "$root"
-docker compose up -d --remove-orphans
-`
+// SetDefaultAppTool is the template's action for the default app, relative to
+// its scripts directory. THE CONTRACT: both templates ship it with the same
+// arguments (<host> <port>) and exit codes. Where the setting is stored and what
+// has to be recreated for it to take effect (the mesh stack's Caddy and the auth
+// stack's registrar, both of which read DEFAULT_SERVICE_HOST) is the template's
+// business — the console only knows this path. Before it existed, the console
+// wrote the mesh template's .env and ran `compose up` itself, which on a Yundera
+// PCS wrote a generated file and recreated the wrong stack.
+const SetDefaultAppTool = "tools/set-default-app.sh"
+
+// ExitBusy is the tool's exit code when a self-check holds the lock.
+const ExitBusy = 75
 
 // SetDefaultApp points the root domain (and the custom-domain catch-all) at
-// host:port.
-func SetDefaultApp(hostRoot, host string, port int) (Verb, error) {
-	if err := checkRoot(hostRoot); err != nil {
+// host:port, through the template's own tool.
+func SetDefaultApp(scripts, host string, port int) (Verb, error) {
+	if err := checkRoot(scripts); err != nil {
 		return Verb{}, err
 	}
 	if !hostRe.MatchString(host) {
@@ -78,7 +79,7 @@ func SetDefaultApp(hostRoot, host string, port int) (Verb, error) {
 	}
 	return Verb{
 		Name: "set-default-app",
-		Argv: []string{"bash", "-c", setDefaultAppScript, "set-default-app", hostRoot, host, strconv.Itoa(port)},
+		Argv: []string{"bash", path.Join(scripts, SetDefaultAppTool), host, strconv.Itoa(port)},
 	}, nil
 }
 
@@ -86,7 +87,7 @@ var rootRe = regexp.MustCompile(`^/[a-zA-Z0-9/_.-]+$`)
 
 func checkRoot(p string) error {
 	if !rootRe.MatchString(p) || path.Clean(p) != p || p == "/" {
-		return errors.New("invalid MESH_HOST_ROOT")
+		return errors.New("invalid host path (MESH_HOST_ROOT / TEMPLATE_SCRIPTS)")
 	}
 	return nil
 }

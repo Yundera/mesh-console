@@ -94,6 +94,7 @@ func (s *Server) routes(uiFS fs.FS) http.Handler {
 		api.Get("/selfcheck", s.handleSelfCheck)
 		api.Get("/domain", s.handleDomain)
 		api.Post("/domain/default-app", s.handleSetDefaultApp)
+		api.Get("/certificates", s.handleCertificates)
 		api.Get("/mail", s.handleMail)
 		api.Post("/mail/test", s.handleMailTest)
 		api.NotFound(func(w http.ResponseWriter, _ *http.Request) {

@@ -32,6 +32,20 @@ func meshFixture(t *testing.T) string {
 	return dir
 }
 
+// withTool gives a fixture the template's default-app action, as a template
+// that ships it would have (the console looks for it under its /mesh mount).
+func withTool(t *testing.T, dir, scriptsRel string) string {
+	t.Helper()
+	tool := filepath.Join(dir, scriptsRel, "tools", "set-default-app.sh")
+	if err := os.MkdirAll(filepath.Dir(tool), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tool, []byte("#!/bin/bash\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func do(h http.Handler, method, path string, headers map[string]string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader("{}"))
 	for k, v := range headers {
@@ -75,7 +89,7 @@ func TestDevIdentityGuard(t *testing.T) {
 }
 
 func TestCSRFGuardAndOverview(t *testing.T) {
-	h := testServer(t, config.Config{DevIdentity: "dev", Env: "development", MeshDir: meshFixture(t), MeshHostRoot: "/DATA/AppData/mesh", DefaultAppEdit: true})
+	h := testServer(t, config.Config{DevIdentity: "dev", Env: "development", MeshDir: withTool(t, meshFixture(t), "scripts"), MeshHostRoot: "/DATA/AppData/mesh", DefaultAppEdit: true})
 
 	if rec := do(h, http.MethodPost, "/api/update/run", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("POST without header = %d, want 403", rec.Code)
@@ -101,6 +115,30 @@ func TestDefaultAppEditDisabled(t *testing.T) {
 	rec := do(h, http.MethodPost, "/api/domain/default-app", map[string]string{"X-Mesh-Console": "1"})
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "DEFAULT_APP_EDIT") {
 		t.Fatalf("disabled edit = %d %s", rec.Code, rec.Body)
+	}
+}
+
+// A template without tools/set-default-app.sh gets a read-only editor with the
+// reason, never a verb that runs a missing script. The Yundera layout (scripts
+// under template/, below the mounted root) is found the same way.
+func TestDefaultAppNeedsTemplateTool(t *testing.T) {
+	h := testServer(t, config.Config{DevIdentity: "dev", Env: "development", MeshDir: meshFixture(t), MeshHostRoot: "/DATA/AppData/mesh", DefaultAppEdit: true})
+	rec := do(h, http.MethodPost, "/api/domain/default-app", map[string]string{"X-Mesh-Console": "1"})
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "set-default-app.sh") {
+		t.Fatalf("missing tool = %d %s", rec.Code, rec.Body)
+	}
+	rec = do(h, http.MethodGet, "/api/domain", nil)
+	if !strings.Contains(rec.Body.String(), `"editable":false`) || !strings.Contains(rec.Body.String(), "set-default-app.sh") {
+		t.Fatalf("domain = %s", rec.Body)
+	}
+
+	ynd := config.Config{DevIdentity: "dev", Env: "development", MeshHostRoot: "/DATA/AppData/yundera",
+		TemplateScripts: "/DATA/AppData/yundera/template/scripts", DefaultAppEdit: true}
+	ynd.MeshDir = withTool(t, meshFixture(t), "template/scripts")
+	h = testServer(t, ynd)
+	rec = do(h, http.MethodGet, "/api/domain", nil)
+	if !strings.Contains(rec.Body.String(), `"editable":true`) {
+		t.Fatalf("yundera layout domain = %s", rec.Body)
 	}
 }
 

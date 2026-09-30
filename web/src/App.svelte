@@ -3,6 +3,7 @@
   import Update from './pages/Update.svelte'
   import Domain from './pages/Domain.svelte'
   import Email from './pages/Email.svelte'
+  import Certificates from './pages/Certificates.svelte'
   import Diagnostics from './pages/Diagnostics.svelte'
 
   const pages = [
@@ -10,6 +11,7 @@
     { path: '/email', label: 'Email', component: Email },
     { path: '/update', label: 'Update', component: Update },
     { path: '/domain', label: 'Domain', component: Domain },
+    { path: '/certificates', label: 'Certificates', component: Certificates },
     { path: '/diagnostics', label: 'Diagnostics', component: Diagnostics },
   ]
 
