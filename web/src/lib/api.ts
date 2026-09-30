@@ -86,7 +86,7 @@ export interface Routing {
   lastSeenOnline?: string | null
   backendError?: string
   tunnel?: { handshakes: { interface: string; peer: string; last: string; never: boolean }[] | null; error?: string }
-  cert?: { subject: string; dnsNames: string[]; notAfter: string; issuer: string }
+  cert?: { subject: string; dnsNames: string[]; notBefore?: string; notAfter: string; issuer: string }
   certError?: string
   rootDomain?: { status: number; error?: string; catchall: boolean }
 }
@@ -152,4 +152,68 @@ export interface DomainInfo {
   editable: boolean
   candidates?: { name: string; project?: string; state: string; ports: number[] | null; onPcs: boolean }[]
   candidatesError?: string
+}
+
+export type Level = 'ok' | 'info' | 'warn' | 'bad' | 'unknown'
+
+export interface Tile {
+  level: Level
+  label: string
+  detail?: string
+  at?: string
+  link: string
+}
+
+export interface Issue {
+  level: Level
+  area: string
+  message: string
+  link: string
+}
+
+export interface Status extends Overview {
+  summary: {
+    level: Level
+    tiles: Record<'reachability' | 'updates' | 'services' | 'email', Tile>
+    issues: Issue[]
+  }
+}
+
+export interface MailCounts {
+  sent: number
+  failed: number
+  skipped: number
+  rateLimited: number
+}
+
+export interface MailEvent {
+  time: string
+  app: string
+  from?: string
+  to: string
+  status: 'sent' | 'skipped' | 'failed' | 'rate_limited'
+  error?: string
+}
+
+export interface MailStats {
+  version: string
+  since?: string | null
+  retentionDays: number
+  totals: { h24: MailCounts; d7: MailCounts }
+  apps: (MailCounts & { app: string; from?: string; last?: string })[]
+  recent: MailEvent[]
+  persistent: boolean
+}
+
+export interface MailInfo {
+  domainName: string
+  serverDomain: string
+  accountEmail: string
+  limitPerHour: number
+  setup: { host: string; port: number; tls: boolean; auth: boolean }
+  relay?: string
+  relayImage?: string
+  relayState?: string
+  stats?: MailStats
+  statsError?: string
 }

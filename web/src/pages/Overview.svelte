@@ -1,304 +1,255 @@
 <script lang="ts">
   import Card from '../lib/Card.svelte'
   import Pill from '../lib/Pill.svelte'
-  import { api, type Overview, type Routing, type StackContainer, type Mode } from '../lib/api'
-  import { ago, dateTime } from '../lib/format'
+  import { api, type Status, type Level } from '../lib/api'
+  import { ago } from '../lib/format'
+  import { navigate } from '../lib/nav'
 
-  let overview = $state<Overview | null>(null)
-  let routing = $state<Routing | null>(null)
-  let stack = $state<StackContainer[] | null>(null)
-  let errors = $state<{ overview?: string; routing?: string; stack?: string }>({})
-  let loadingRouting = $state(false)
+  let status = $state<Status | null>(null)
+  let error = $state('')
 
-  async function loadOverview() {
+  async function load() {
     try {
-      overview = await api.get<Overview>('/api/overview')
-      errors.overview = undefined
+      status = await api.get<Status>('/api/status')
+      error = ''
     } catch (e) {
-      errors.overview = (e as Error).message
-    }
-  }
-  async function loadRouting() {
-    loadingRouting = true
-    try {
-      routing = await api.get<Routing>('/api/routing')
-      errors.routing = undefined
-    } catch (e) {
-      errors.routing = (e as Error).message
-    } finally {
-      loadingRouting = false
-    }
-  }
-  async function loadStack() {
-    try {
-      stack = (await api.get<{ containers: StackContainer[] | null }>('/api/stack')).containers ?? []
-      errors.stack = undefined
-    } catch (e) {
-      errors.stack = (e as Error).message
+      error = (e as Error).message
     }
   }
 
   $effect(() => {
-    loadOverview()
-    loadRouting()
-    loadStack()
-    const t = setInterval(() => {
-      loadRouting()
-      loadStack()
-    }, 30_000)
+    load()
+    const t = setInterval(load, 30_000)
     return () => clearInterval(t)
   })
 
-  const modeLabel: Record<Mode, string> = {
-    direct: 'Direct',
-    tunnel: 'Tunnel',
-    other: 'Other',
-    offline: 'Offline',
-  }
-  const modeTone = (m: Mode) => (m === 'direct' ? 'ok' : m === 'tunnel' ? 'info' : m === 'offline' ? 'bad' : 'warn')
-
-  function modeExplain(r: Routing): string {
-    const s = r.state
-    if (!s) return ''
-    if (s.mode === 'direct') return 'The gateway connects straight to this box’s public IP (mesh-router-agent).'
-    if (s.mode === 'tunnel')
-      return s.hasAgent
-        ? 'A direct route is registered but ranks below the tunnel.'
-        : 'No direct route is registered, so traffic goes through the WireGuard tunnel. This is normal behind NAT; on a box with a public IP it usually means the gateway could not validate the direct route.'
-    if (s.mode === 'offline')
-      return 'The backend holds no live route for this box. Public URLs will not load until the agent or the tunnel registers again (every few minutes).'
-    return 'A route from an unexpected source ranks first.'
+  const headline: Record<Level, string> = {
+    ok: 'All good',
+    info: 'All good',
+    warn: 'Needs attention',
+    bad: 'Not working',
+    unknown: 'Checking…',
   }
 
-  function certTone(notAfter: string) {
-    const days = (new Date(notAfter).getTime() - Date.now()) / 86_400_000
-    return days < 0 ? 'bad' : days < 7 ? 'warn' : 'ok'
-  }
+  const tiles = [
+    { key: 'reachability', title: 'Internet access' },
+    { key: 'updates', title: 'Updates' },
+    { key: 'services', title: 'Services' },
+    { key: 'email', title: 'Email' },
+  ] as const
 
-  function handshakeTone(last: string, never: boolean) {
-    if (never) return 'bad'
-    const age = (Date.now() - new Date(last).getTime()) / 1000
-    // wg keepalive re-handshakes every ~2 min; the tunnel restarts a link after 5.
-    return age < 180 ? 'ok' : age < 300 ? 'warn' : 'bad'
-  }
+  const tone = (l: Level) => (l === 'unknown' ? 'neutral' : l)
 
-  function rootTone(status: number) {
-    return status >= 200 && status < 400 ? 'ok' : status >= 500 || status === 0 ? 'bad' : 'warn'
+  // One sentence under the headline, built from the tiles.
+  function summaryLine(s: Status['summary']): string {
+    const t = s.tiles
+    const parts = [
+      t.reachability.level === 'ok' ? 'Reachable from the internet' : t.reachability.label,
+      t.updates.label,
+      t.services.level === 'ok' ? `${t.services.detail ?? ''} running`.trim() : t.services.label,
+    ]
+    return parts.filter(Boolean).join(' · ')
   }
 </script>
 
-<div class="grid">
-  <Card title="This box">
-    {#if errors.overview}
-      <p class="error">{errors.overview}</p>
-    {:else if !overview}
-      <p class="subtle">Loading…</p>
-    {:else}
-      <dl class="kv">
-        <dt>Domain</dt>
-        <dd><a href={overview.links.root} target="_blank" rel="noopener">{overview.domain}</a></dd>
-        <dt>Public IP</dt>
-        <dd class="mono">{overview.publicIp || '—'}</dd>
-        {#if overview.publicIpv4 && overview.publicIpv4 !== overview.publicIp}
-          <dt>IPv4</dt>
-          <dd class="mono">{overview.publicIpv4}</dd>
+{#if error && !status}
+  <Card><p class="error">{error}</p></Card>
+{:else if !status}
+  <Card><p class="subtle">Loading…</p></Card>
+{:else}
+  <section class="hero {status.summary.level}">
+    <div class="identity">
+      <a class="domain" href={status.links.root} target="_blank" rel="noopener">{status.domain}</a>
+      <div class="ip">
+        Public IP <span class="mono">{status.publicIp || '—'}</span>
+        {#if status.publicIpv6 && status.publicIpv6 !== status.publicIp}
+          · <span class="mono">{status.publicIpv6}</span>
         {/if}
-        {#if overview.publicIpv6 && overview.publicIpv6 !== overview.publicIp}
-          <dt>IPv6</dt>
-          <dd class="mono">{overview.publicIpv6}</dd>
-        {/if}
-        {#if overview.email}
-          <dt>Email</dt>
-          <dd>{overview.email}</dd>
-        {/if}
-      </dl>
-      {#if overview.backendError}
-        <p class="muted small">Backend unreachable ({overview.backendError}); names derived from the local .env.</p>
-      {/if}
-    {/if}
-  </Card>
+      </div>
+    </div>
 
-  <Card title="Links">
-    {#if overview}
-      <ul class="links">
-        {#if overview.links.dashboard}
+    <div class="verdict">
+      <span class="dot" aria-hidden="true"></span>
+      <div>
+        <div class="headline">{headline[status.summary.level]}</div>
+        <div class="line">{summaryLine(status.summary)}</div>
+      </div>
+    </div>
+
+    <div class="buttons">
+      <a class="btn primary" href={status.links.maison} target="_blank" rel="noopener">Open Maison</a>
+      {#if status.links.dashboard}
+        <a class="btn" href={status.links.dashboard} target="_blank" rel="noopener">Account dashboard</a>
+      {/if}
+    </div>
+    {#if error}<p class="error small">Refresh failed: {error}</p>{/if}
+  </section>
+
+  {#if status.summary.issues.length}
+    <Card title="What needs attention">
+      <ul class="issues">
+        {#each status.summary.issues as i, n (n)}
           <li>
-            <a href={overview.links.dashboard} target="_blank" rel="noopener">{overview.serverDomain} dashboard</a>
-            <span class="subtle">— your account, domain and devices</span>
+            <Pill tone={tone(i.level)}>{i.level === 'bad' ? 'Problem' : 'Check'}</Pill>
+            <span>{i.message}</span>
+            <a href={i.link} onclick={(e) => navigate(e, i.link)}>Details</a>
           </li>
-        {/if}
-        <li><a href={overview.links.maison} target="_blank" rel="noopener">Maison</a> <span class="subtle">— apps</span></li>
-        <li><a href={overview.links.root} target="_blank" rel="noopener">{overview.domain}</a> <span class="subtle">— root domain</span></li>
-        {#if overview.links.sslip}
-          <li>
-            <a href={overview.links.sslip} target="_blank" rel="noopener">{overview.ipDash}.sslip.io</a>
-            <span class="subtle">— direct, bypasses the gateway</span>
-          </li>
-        {/if}
+        {/each}
       </ul>
-    {/if}
-  </Card>
-
-  <div class="wide">
-    <Card title="Routing">
-      {#snippet actions()}
-        <button onclick={loadRouting} disabled={loadingRouting}>{loadingRouting ? 'Checking…' : 'Refresh'}</button>
-      {/snippet}
-      {#if errors.routing}
-        <p class="error">{errors.routing}</p>
-      {:else if !routing}
-        <p class="subtle">Loading…</p>
-      {:else}
-        {#if routing.state}
-          <div class="mode">
-            <Pill tone={modeTone(routing.state.mode)}>{modeLabel[routing.state.mode]}</Pill>
-            <span>{modeExplain(routing)}</span>
-          </div>
-          {#if routing.state.worker.mode !== routing.state.gateway.mode}
-            <p class="muted small">
-              Cloudflare worker path: <strong>{modeLabel[routing.state.worker.mode]}</strong> — it only uses domain routes,
-              {routing.state.worker.mode === 'offline' ? 'and none is registered, so it falls back to the gateway.' : 'so it picks differently.'}
-            </p>
-          {/if}
-          <p class="subtle small">
-            As the gateways see it: the lowest-priority route wins, there is no failover.
-            Routes expire in {routing.routesTtl !== undefined && routing.routesTtl > 0 ? `${routing.routesTtl}s` : '—'} unless refreshed; last registration {ago(routing.lastSeenOnline)}.
-          </p>
-          {#if routing.routes && routing.routes.length}
-            <div class="table-wrap">
-              <table>
-                <thead><tr><th>Source</th><th>Priority</th><th>Scheme</th><th>Target</th></tr></thead>
-                <tbody>
-                  {#each routing.routes as r, i (i)}
-                    <tr class:active={routing.state.gateway.route && r.source === routing.state.gateway.route.source && r.priority === routing.state.gateway.route.priority && (r.scheme ?? 'https') === (routing.state.gateway.route.scheme ?? 'https')}>
-                      <td>{r.source === 'agent' ? 'agent (direct)' : r.source}</td>
-                      <td>{r.priority || '—'}</td>
-                      <td>{r.scheme ?? 'https'}</td>
-                      <td class="mono">{r.domain || r.ip}:{r.port}</td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          {/if}
-        {:else}
-          <p class="error">Backend unreachable: {routing.backendError}</p>
-        {/if}
-
-        <h3>Local checks</h3>
-        <dl class="kv">
-          <dt>Root domain</dt>
-          <dd>
-            {#if routing.rootDomain}
-              {#if routing.rootDomain.error}
-                <Pill tone="bad">error</Pill> <span class="small">{routing.rootDomain.error}</span>
-              {:else}
-                <Pill tone={rootTone(routing.rootDomain.status)}>HTTP {routing.rootDomain.status}</Pill>
-                <span class="subtle small">Caddy → default app{routing.rootDomain.catchall ? ' (catch-all)' : ''}</span>
-              {/if}
-            {:else}—{/if}
-          </dd>
-          <dt>Tunnel</dt>
-          <dd>
-            {#if routing.tunnel?.error}
-              <Pill tone="warn">unavailable</Pill> <span class="small subtle">{routing.tunnel.error}</span>
-            {:else if routing.tunnel?.handshakes?.length}
-              {#each routing.tunnel.handshakes as h (h.interface + h.peer)}
-                <div>
-                  <Pill tone={handshakeTone(h.last, h.never)}>{h.never ? 'no handshake' : `handshake ${ago(h.last)}`}</Pill>
-                  <span class="mono subtle">{h.interface}</span>
-                </div>
-              {/each}
-            {:else}
-              <Pill tone="neutral">no WireGuard link</Pill>
-            {/if}
-          </dd>
-          <dt>Mesh certificate</dt>
-          <dd>
-            {#if routing.cert}
-              <Pill tone={certTone(routing.cert.notAfter)}>expires {ago(routing.cert.notAfter)}</Pill>
-              <span class="subtle small">{dateTime(routing.cert.notAfter)} · {routing.cert.dnsNames?.length ?? 0} names</span>
-            {:else}
-              <span class="small error">{routing.certError}</span>
-            {/if}
-          </dd>
-        </dl>
-      {/if}
     </Card>
-  </div>
+  {/if}
 
-  <div class="wide">
-    <Card title="Platform containers">
-      {#if errors.stack}
-        <p class="error">{errors.stack}</p>
-      {:else if !stack}
-        <p class="subtle">Loading…</p>
-      {:else if stack.length === 0}
-        <p class="subtle">No containers from the mesh, maison or mesh-console stacks were found.</p>
-      {:else}
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Container</th><th>State</th><th>Image</th></tr></thead>
-            <tbody>
-              {#each stack as c (c.name)}
-                <tr>
-                  <td>{c.name} <span class="subtle small">{c.project}</span></td>
-                  <td>
-                    <Pill tone={c.state !== 'running' ? 'bad' : c.health === 'unhealthy' ? 'bad' : c.health === 'starting' ? 'warn' : 'ok'}>
-                      {c.health || c.state}
-                    </Pill>
-                    <span class="subtle small">{c.status}</span>
-                  </td>
-                  <td class="mono">
-                    {c.image}
-                    {#if c.drift}<div><Pill tone="warn">compose pins {c.declared}</Pill></div>{/if}
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
+  <div class="tiles">
+    {#each tiles as t (t.key)}
+      {@const tile = status.summary.tiles[t.key]}
+      <a class="tile" href={tile.link} onclick={(e) => navigate(e, tile.link)}>
+        <div class="tile-title">{t.title}</div>
+        <Pill tone={tone(tile.level)}>{tile.label}</Pill>
+        <div class="tile-detail subtle">
+          {tile.detail ?? ''}{#if tile.at}{tile.detail ? ' ' : ''}{ago(tile.at)}{/if}
         </div>
-      {/if}
-    </Card>
+      </a>
+    {/each}
   </div>
-</div>
+{/if}
 
 <style>
-  .grid {
+  .hero {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--border-strong);
+    border-radius: var(--radius-card);
+    padding: 1.4rem 1.4rem 1.2rem;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
+    gap: 1.1rem;
+    margin-bottom: 1rem;
   }
-  .wide {
-    grid-column: 1 / -1;
-    min-width: 0;
+  .hero.ok,
+  .hero.info {
+    border-left-color: var(--green);
   }
-  @media (max-width: 760px) {
-    .grid {
-      grid-template-columns: minmax(0, 1fr);
-    }
+  .hero.warn {
+    border-left-color: var(--orange);
   }
-  .links {
+  .hero.bad {
+    border-left-color: var(--red);
+  }
+  .domain {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text);
+    overflow-wrap: anywhere;
+  }
+  .ip {
+    color: var(--text-muted);
+    margin-top: 0.2rem;
+    overflow-wrap: anywhere;
+  }
+  .verdict {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+  }
+  .dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-top: 0.4rem;
+    flex: none;
+    background: var(--text-subtle);
+  }
+  .ok .dot,
+  .info .dot {
+    background: var(--green);
+  }
+  .warn .dot {
+    background: var(--orange);
+  }
+  .bad .dot {
+    background: var(--red);
+  }
+  .headline {
+    font-size: 1.15rem;
+    font-weight: 600;
+  }
+  .line {
+    color: var(--text-muted);
+  }
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .btn {
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    padding: 0.45rem 0.9rem;
+    color: var(--text);
+  }
+  .btn:hover {
+    background: var(--surface-3);
+    text-decoration: none;
+  }
+  .btn.primary {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--text-on-accent);
+  }
+  .issues {
     list-style: none;
-    padding: 0;
     margin: 0;
+    padding: 0;
     display: grid;
-    gap: 0.45rem;
+    gap: 0.6rem;
   }
-  .mode {
+  .issues li {
     display: flex;
     gap: 0.6rem;
     align-items: baseline;
-    margin-bottom: 0.4rem;
+    flex-wrap: wrap;
+  }
+  .issues li span {
+    flex: 1 1 16rem;
+  }
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+  @media (max-width: 860px) {
+    .tiles {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 420px) {
+    .tiles {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: 0.9rem 1rem;
+    display: grid;
+    gap: 0.45rem;
+    justify-items: start;
+    color: var(--text);
+  }
+  .tile:hover {
+    border-color: var(--border-strong);
+    text-decoration: none;
+  }
+  .tile-title {
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+  .tile-detail {
+    font-size: 0.8rem;
+    min-height: 1em;
   }
   .small {
     font-size: 0.8rem;
-  }
-  h3 {
-    font-size: 0.85rem;
-    margin: 1.1rem 0 0.6rem;
-  }
-  tr.active td {
-    background: var(--ok-bg);
   }
 </style>

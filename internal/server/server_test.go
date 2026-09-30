@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -50,7 +51,7 @@ func TestHealthIsPublic(t *testing.T) {
 
 func TestAPIRequiresAssertion(t *testing.T) {
 	h := testServer(t, config.Config{AssertionSecret: "s", AssertionAudience: "mesh-console"})
-	for _, p := range []string{"/api/overview", "/api/routing", "/api/update", "/api/selfcheck", "/api/domain", "/api/stack", "/api/nope"} {
+	for _, p := range []string{"/api/status", "/api/mail", "/api/overview", "/api/routing", "/api/update", "/api/selfcheck", "/api/domain", "/api/stack", "/api/nope"} {
 		if rec := do(h, http.MethodGet, p, nil); rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s = %d, want 401", p, rec.Code)
 		}
@@ -111,5 +112,55 @@ func TestSPA(t *testing.T) {
 	rec := do(h, http.MethodGet, "/assets/app-1.js", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Cache-Control"), "immutable") {
 		t.Fatalf("asset = %d %q", rec.Code, rec.Header().Get("Cache-Control"))
+	}
+}
+
+type fakeMailer struct{ to []string }
+
+func (f *fakeMailer) Send(_ context.Context, to string) error {
+	f.to = append(f.to, to)
+	return nil
+}
+
+func TestMailTestRecipientIsFixed(t *testing.T) {
+	dir := meshFixture(t)
+	cfg := config.Config{DevIdentity: "dev", Env: "development", MeshDir: dir}
+	s := newServer(cfg)
+	fm := &fakeMailer{}
+	s.mailer = fm
+	h := s.routes(fstest.MapFS{})
+	post := map[string]string{"X-Mesh-Console": "1"}
+
+	if rec := do(h, http.MethodPost, "/api/mail/test", post); rec.Code != http.StatusConflict {
+		t.Fatalf("no EMAIL = %d %s, want 409", rec.Code, rec.Body)
+	}
+	env := "DOMAIN=alice.nsl.sh\nEMAIL=owner@example.com\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A body naming another recipient is ignored.
+	req := httptest.NewRequest(http.MethodPost, "/api/mail/test", strings.NewReader(`{"to":"victim@example.org"}`))
+	req.Header.Set("X-Mesh-Console", "1")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || len(fm.to) != 1 || fm.to[0] != "owner@example.com" {
+		t.Fatalf("send = %d %s, sent to %v", rec.Code, rec.Body, fm.to)
+	}
+	if rec := do(h, http.MethodPost, "/api/mail/test", post); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second send = %d, want 429", rec.Code)
+	}
+}
+
+func TestStatus(t *testing.T) {
+	h := testServer(t, config.Config{DevIdentity: "dev", Env: "development", MeshDir: meshFixture(t)})
+	rec := do(h, http.MethodGet, "/api/status", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d %s", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"domain":"alice.nsl.sh"`, `"summary":`, `"reachability":`, `"email":`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("status missing %s: %s", want, body)
+		}
 	}
 }

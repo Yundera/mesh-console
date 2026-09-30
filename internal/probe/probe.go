@@ -56,10 +56,11 @@ func Root(ctx context.Context, caddyHost, domain string) RootDomain {
 }
 
 type Cert struct {
-	Subject  string    `json:"subject"`
-	DNSNames []string  `json:"dnsNames"`
-	NotAfter time.Time `json:"notAfter"`
-	Issuer   string    `json:"issuer"`
+	Subject   string    `json:"subject"`
+	DNSNames  []string  `json:"dnsNames"`
+	NotBefore time.Time `json:"notBefore"`
+	NotAfter  time.Time `json:"notAfter"`
+	Issuer    string    `json:"issuer"`
 }
 
 // AgentCert reads the certificate mesh-router-agent obtained from the backend
@@ -78,5 +79,5 @@ func AgentCert(meshDir string) (*Cert, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Cert{Subject: c.Subject.CommonName, DNSNames: c.DNSNames, NotAfter: c.NotAfter, Issuer: c.Issuer.CommonName}, nil
+	return &Cert{Subject: c.Subject.CommonName, DNSNames: c.DNSNames, NotBefore: c.NotBefore, NotAfter: c.NotAfter, Issuer: c.Issuer.CommonName}, nil
 }

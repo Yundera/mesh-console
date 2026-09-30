@@ -2,11 +2,15 @@
   import Overview from './pages/Overview.svelte'
   import Update from './pages/Update.svelte'
   import Domain from './pages/Domain.svelte'
+  import Email from './pages/Email.svelte'
+  import Diagnostics from './pages/Diagnostics.svelte'
 
   const pages = [
     { path: '/', label: 'Overview', component: Overview },
+    { path: '/email', label: 'Email', component: Email },
     { path: '/update', label: 'Update', component: Update },
     { path: '/domain', label: 'Domain', component: Domain },
+    { path: '/diagnostics', label: 'Diagnostics', component: Diagnostics },
   ]
 
   let path = $state(location.pathname)

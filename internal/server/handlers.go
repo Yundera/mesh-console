@@ -36,12 +36,17 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "cannot read mesh .env: "+err.Error())
 		return
 	}
+	writeJSON(w, http.StatusOK, s.overviewData(r.Context(), env))
+}
+
+// overviewData is who this box is and where its pages live.
+func (s *Server) overviewData(ctx context.Context, env meshenv.Env) map[string]any {
 	domain := env.Get("DOMAIN")
 	ipDash := env.Get("PUBLIC_IP_DASH")
 	if ipDash == "" && env.Get("PUBLIC_IP") != "" {
 		ipDash = meshenv.Dash(env.Get("PUBLIC_IP"))
 	}
-	_, domainName, serverDomain, idErr := s.identity(r.Context(), env)
+	_, domainName, serverDomain, idErr := s.identity(ctx, env)
 
 	l := links{Root: "https://" + domain, Maison: "https://maison-" + domain}
 	if serverDomain != "" {
@@ -51,7 +56,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		l.Sslip = "https://" + ipDash + ".sslip.io"
 		l.Nip = "https://" + ipDash + ".nip.io"
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	return map[string]any{
 		"domain":       domain,
 		"domainName":   domainName,
 		"serverDomain": serverDomain,
@@ -62,7 +67,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		"email":        env.Get("EMAIL"),
 		"links":        l,
 		"backendError": errString(idErr),
-	})
+	}
 }
 
 // ---- routing -------------------------------------------------------------
@@ -80,8 +85,21 @@ func (s *Server) handleRouting(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
+	writeJSON(w, http.StatusOK, s.gatherRouting(ctx, env, true).out)
+}
 
+type routingResult struct {
+	out   map[string]any
+	state *routing.State // nil when the backend could not be asked
+	cert  *probe.Cert
+}
+
+// gatherRouting asks the backend how the gateways reach this box. With local
+// set it also collects the slower on-box evidence (tunnel handshakes, a probe
+// of the root domain), which only the Diagnostics page shows.
+func (s *Server) gatherRouting(ctx context.Context, env meshenv.Env, local bool) routingResult {
 	out := map[string]any{}
+	var rr routingResult
 	base, domainName, _, idErr := s.identity(ctx, env)
 	var res backend.Resolution
 	var resErr error
@@ -95,10 +113,21 @@ func (s *Server) handleRouting(w http.ResponseWriter, r *http.Request) {
 		out["state"] = nil
 	} else {
 		st := routing.Infer(res.Routes, res.RoutesTTL)
+		rr.state = &st
 		out["state"] = st
 		out["routes"] = res.Routes
 		out["routesTtl"] = res.RoutesTTL
 		out["lastSeenOnline"] = res.LastSeenOnline
+	}
+	if c, err := probe.AgentCert(s.cfg.MeshDir); err != nil {
+		out["certError"] = err.Error()
+	} else {
+		rr.cert = c
+		out["cert"] = c
+	}
+	rr.out = out
+	if !local {
+		return rr
 	}
 
 	// Local evidence, gathered even when the backend is unreachable — that is
@@ -112,15 +141,10 @@ func (s *Server) handleRouting(w http.ResponseWriter, r *http.Request) {
 		}
 		out["tunnel"] = te
 	}
-	if c, err := probe.AgentCert(s.cfg.MeshDir); err != nil {
-		out["certError"] = err.Error()
-	} else {
-		out["cert"] = c
-	}
 	if d := env.Get("DOMAIN"); d != "" {
 		out["rootDomain"] = probe.Root(ctx, s.cfg.CaddyHost, d)
 	}
-	writeJSON(w, http.StatusOK, out)
+	return rr
 }
 
 // ---- stack ---------------------------------------------------------------
@@ -138,10 +162,22 @@ func (s *Server) handleStack(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "docker socket unavailable")
 		return
 	}
-	all, err := s.docker.List(r.Context())
+	out, err := s.gatherStack(r.Context())
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"containers": out})
+}
+
+// gatherStack lists the platform containers with their compose pin drift.
+func (s *Server) gatherStack(ctx context.Context) ([]stackEntry, error) {
+	if s.docker == nil {
+		return nil, errors.New("docker socket unavailable")
+	}
+	all, err := s.docker.List(ctx)
+	if err != nil {
+		return nil, err
 	}
 	declared := map[string]string{} // container name -> image
 	for _, pin := range s.pins() {
@@ -158,7 +194,7 @@ func (s *Server) handleStack(w http.ResponseWriter, r *http.Request) {
 		e.Drift = e.Declared != "" && e.Declared != c.Image
 		out = append(out, e)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"containers": out})
+	return out, nil
 }
 
 // pins reads the compose files of the mesh stack and its auxiliary stacks.
@@ -178,6 +214,13 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "cannot read mesh .env: "+err.Error())
 		return
 	}
+	out, _ := s.gatherUpdate(r.Context(), env, r.URL.Query().Get("refresh") == "1")
+	writeJSON(w, http.StatusOK, out)
+}
+
+// gatherUpdate compares the installed template with the branch head. refresh
+// bypasses the GitHub cache; the Overview never sets it.
+func (s *Server) gatherUpdate(ctx context.Context, env meshenv.Env, refresh bool) (map[string]any, update.State) {
 	updateURL := env.Get("UPDATE_URL", "MESH_TEMPLATE_URL")
 	out := map[string]any{
 		"updateUrl":   updateURL,
@@ -195,7 +238,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	var latest *update.Latest
 	if repo, ok := update.ParseRepo(updateURL); ok {
 		out["repo"] = repo.Owner + "/" + repo.Name + "@" + repo.Branch
-		l, err := s.github.Latest(r.Context(), repo, r.URL.Query().Get("refresh") == "1")
+		l, err := s.github.Latest(ctx, repo, refresh)
 		if err != nil {
 			out["latestError"] = err.Error()
 		} else {
@@ -205,8 +248,9 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		out["latestError"] = "update source is not a GitHub branch tarball; cannot check for a newer version"
 	}
 	out["latest"] = latest
-	out["state"] = update.Compare(installed, latest)
-	writeJSON(w, http.StatusOK, out)
+	st := update.Compare(installed, latest)
+	out["state"] = st
+	return out, st
 }
 
 func (s *Server) handleUpdateRun(w http.ResponseWriter, r *http.Request) {
@@ -236,28 +280,19 @@ func (s *Server) handleSelfCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{}
 
-	rc, err := selfcheck.Tail(logPath, 2<<20)
-	if err != nil {
-		out["error"] = err.Error()
-	} else {
-		runs, perr := selfcheck.Parse(rc, time.Local)
-		rc.Close()
-		if perr != nil {
-			out["error"] = perr.Error()
-		}
-		if len(runs) > 5 {
-			runs = runs[len(runs)-5:]
-		}
-		out["runs"] = runs
-		if len(runs) > 0 {
-			last := runs[len(runs)-1]
-			out["running"] = last.Status == selfcheck.RunIncomplete && time.Since(last.LastLine) < stallAfter
+	sc := s.selfCheckState(r.Context())
+	if sc.err != nil {
+		out["error"] = sc.err.Error()
+	}
+	if sc.parsed {
+		out["runs"] = sc.runs
+		if len(sc.runs) > 0 {
+			out["running"] = sc.running
 		}
 	}
 	if s.docker != nil {
-		busy, _ := s.docker.RunnerBusy(r.Context())
-		out["runnerBusy"] = busy
-		if busy {
+		out["runnerBusy"] = sc.runnerBusy
+		if sc.runnerBusy {
 			out["running"] = true
 		}
 	}

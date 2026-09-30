@@ -18,6 +18,7 @@ import (
 	"github.com/yundera/mesh-console/internal/backend"
 	"github.com/yundera/mesh-console/internal/config"
 	"github.com/yundera/mesh-console/internal/dockerx"
+	"github.com/yundera/mesh-console/internal/mail"
 	"github.com/yundera/mesh-console/internal/meshenv"
 	"github.com/yundera/mesh-console/internal/update"
 )
@@ -35,6 +36,11 @@ type Server struct {
 	// when the user renames their domain, so a minute is plenty.
 	idMu    sync.Mutex
 	idCache *identityCache
+
+	// mailer sends the Email page's test message; lastTestMail rate-limits it.
+	mailer       mail.Sender
+	mailMu       sync.Mutex
+	lastTestMail time.Time
 }
 
 type identityCache struct {
@@ -46,7 +52,11 @@ type identityCache struct {
 }
 
 func New(cfg config.Config, uiFS fs.FS) http.Handler {
-	s := &Server{cfg: cfg, github: update.NewGitHub()}
+	return newServer(cfg).routes(uiFS)
+}
+
+func newServer(cfg config.Config) *Server {
+	s := &Server{cfg: cfg, github: update.NewGitHub(), mailer: mail.SMTPSender{Addr: cfg.SMTPAddr}}
 	s.authn = auth.Authenticator{Secret: []byte(cfg.AssertionSecret), Audience: cfg.AssertionAudience}
 	if cfg.AssertionSecret == "" && cfg.DevIdentity != "" && cfg.Env == "development" {
 		log.Printf("WARNING: DEV_IDENTITY=%q — every request is treated as that admin", cfg.DevIdentity)
@@ -59,7 +69,10 @@ func New(cfg config.Config, uiFS fs.FS) http.Handler {
 	} else {
 		s.docker = d
 	}
+	return s
+}
 
+func (s *Server) routes(uiFS fs.FS) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP, middleware.Recoverer, securityHeaders)
 
@@ -72,6 +85,7 @@ func New(cfg config.Config, uiFS fs.FS) http.Handler {
 		api.Use(s.authn.RequireAdmin)
 		api.Use(csrfGuard)
 		api.Get("/me", s.handleMe)
+		api.Get("/status", s.handleStatus)
 		api.Get("/overview", s.handleOverview)
 		api.Get("/routing", s.handleRouting)
 		api.Get("/stack", s.handleStack)
@@ -80,6 +94,8 @@ func New(cfg config.Config, uiFS fs.FS) http.Handler {
 		api.Get("/selfcheck", s.handleSelfCheck)
 		api.Get("/domain", s.handleDomain)
 		api.Post("/domain/default-app", s.handleSetDefaultApp)
+		api.Get("/mail", s.handleMail)
+		api.Post("/mail/test", s.handleMailTest)
 		api.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 			writeError(w, http.StatusNotFound, "not found")
 		})

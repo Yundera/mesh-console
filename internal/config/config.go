@@ -56,6 +56,11 @@ type Config struct {
 	DefaultAppEdit bool
 	// PlatformProjects are the compose projects listed as platform containers.
 	PlatformProjects []string
+
+	// MailContainer is the mail relay (mail-gateway) the Email page reads its
+	// activity from; SMTPAddr is where the test email is sent.
+	MailContainer string
+	SMTPAddr      string
 }
 
 func FromEnv() Config {
@@ -75,6 +80,8 @@ func FromEnv() Config {
 		SelfCheckScript:   strings.TrimSpace(os.Getenv("SELF_CHECK_SCRIPT")),
 		DefaultAppEdit:    !isFalse(os.Getenv("DEFAULT_APP_EDIT")),
 		PlatformProjects:  csv(def(os.Getenv("PLATFORM_PROJECTS"), "mesh,maison,mesh-console")),
+		MailContainer:     def(os.Getenv("MAIL_CONTAINER"), "smtp"),
+		SMTPAddr:          def(os.Getenv("SMTP_ADDR"), "smtp:587"),
 	}
 }
 

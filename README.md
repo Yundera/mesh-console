@@ -6,9 +6,11 @@ Served at `mesh-console-${DOMAIN}`, behind an AppShield gate, admins only.
 
 | Page | Shows | Acts |
 |---|---|---|
-| **Overview** | Domain, public IP(s), links (nsl.sh dashboard, Maison, root domain, sslip.io); routing state **Direct / Tunnel / Offline** with the routes the backend holds; tunnel handshake age; mesh certificate expiry; root-domain probe; platform containers and image drift | — |
+| **Overview** | Domain, public IP, one verdict (**All good / Needs attention / Not working**) and four tiles — internet access, updates, services, email — with plain-language issues. Computed server-side by `internal/status` (`GET /api/status`) | — |
+| **Email** | Where app mail goes and the address it is sent as (`<app>.<domainName>@<serverDomain>`); SMTP settings for apps; activity (sent / failed / not delivered, per app, recent) read from the mail relay | **Send a test email** — always to the account `EMAIL`, at most one a minute |
 | **Update** | Installed template commit vs latest on the `UPDATE_URL` branch; auto-update / cron settings; last self-check runs step by step; raw log | **Update now** = run the self-check |
 | **Domain** | Domain, sslip.io / nip.io fallbacks, root-domain default app, custom-domain DNS help | Change the default app (container + port) |
+| **Diagnostics** | Links (incl. sslip.io); routing state **Direct / Tunnel / Offline** with the routes the backend holds; tunnel handshake age; mesh certificate expiry; root-domain probe; platform containers and image drift | — |
 
 ## How it works
 
@@ -18,7 +20,8 @@ browser ─► mesh-router-caddy ─► mesh-console (AppShield gate, OIDC_REQUI
                                      ▼
                                mesh-console-app (this image)
                      ├─ reads  /mesh  = ${DATA_ROOT}/AppData/mesh, read-only
-                     ├─ docker socket: list / inspect / exec `wg show` / run the runner
+                     ├─ docker socket: list / inspect / exec `wg show` / exec `mail-gateway stats` / run the runner
+                     ├─ SMTP: smtp:587 (the test email only)
                      ├─ HTTPS: mesh-router-backend  GET /router/api/{domain,resolve/v2,version}
                      └─ HTTPS: GitHub API (latest template commit, cached 1h)
 ```
@@ -40,6 +43,10 @@ browser ─► mesh-router-caddy ─► mesh-console (AppShield gate, OIDC_REQUI
 - **Routing state** is inferred from the backend's `resolve/v2` answer the way the
   gateways pick (lowest priority wins, no failover; the CF worker only uses domain
   routes). It describes the registry, not observed traffic.
+- **Mail activity** comes from `docker exec smtp /app/mail-gateway stats` (mail-gateway
+  ≥ 1.1.0 keeps counters on its `/data` volume), so the relay exposes no stats port on
+  `pcs`. An older relay shows "not reported" and nothing else breaks. The test email is
+  plain SMTP to the relay; its recipient is never taken from the request.
 - **Template version** comes from `template/.revision.json`, written by
   `ensure-template-sync.sh` after each successful sync (`{url, commit, synced_at}`; the
   commit is read from the tarball's pax header). Boxes that have not synced since that
@@ -57,6 +64,8 @@ browser ─► mesh-router-caddy ─► mesh-console (AppShield gate, OIDC_REQUI
 | `RUNNER_IMAGE` | — | Override that lookup |
 | `TUNNEL_CONTAINER` | `mesh-router-tunnel` | Where `wg show` runs |
 | `CADDY_HOST` | `mesh-router-caddy` | Target of the root-domain probe |
+| `MAIL_CONTAINER` | `smtp` | The mail relay whose activity the Email page shows |
+| `SMTP_ADDR` | `smtp:587` | Where the test email is sent |
 | `TZ` | host `/etc/localtime` | Timezone the self-check log (written in host local time) is parsed in. The template bind-mounts `/etc/localtime` instead of setting it |
 | `LISTEN_ADDR` | `:8080` | |
 | `MESH_CONSOLE_ENV`, `DEV_IDENTITY` | `production`, — | `DEV_IDENTITY=<name>` skips auth, **only** when `MESH_CONSOLE_ENV=development` and no secret is set |
