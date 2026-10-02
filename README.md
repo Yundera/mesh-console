@@ -12,6 +12,7 @@ Served at `mesh-console-${DOMAIN}`, behind an AppShield gate, admins only.
 | **Domain** | Domain, sslip.io / nip.io fallbacks, root-domain default app, custom-domain DNS help | Change the default app (container + port) |
 | **Certificates** | The mesh certificate (box domain + nip.io) and, for every sslip.io address Caddy serves (running containers' `caddy`/`caddy_N` labels + the root sslip.io block), the certificate it actually presents — Let's Encrypt, fallback (internal CA) or none — from a TLS handshake with Caddy over `pcs`. Expiry is judged against each cert's own lifetime. For a non-Let's-Encrypt address, the reason is read from Caddy's last 14 days of log. On demand only (`GET /api/certificates`), never polled | **Check again** |
 | **Diagnostics** | Links (incl. sslip.io); routing state **Direct / Tunnel / Offline** with the routes the backend holds; tunnel handshake age; mesh certificate expiry; root-domain probe; platform containers and image drift | — |
+| **Migration** | Moving the box to another machine with the template's `tools/migrate.sh`: this box's migration key, the target check (every requirement, nothing changed), then the live run — steps grouped by who serves the apps, copy progress, the log. A retired box says where it went; a box that was migrated onto says where it came from | **Create migration key**, **Check**, **Start migration**, **Cancel** |
 
 ## How it works
 
@@ -33,13 +34,20 @@ browser ─► mesh-router-caddy ─► mesh-console (AppShield gate, OIDC_REQUI
   `X-Auth-Request-*` headers are ignored: any container on `pcs` can reach the app
   directly. No secret configured → every request is refused. State-changing requests
   also need an `X-Mesh-Console: 1` header (CSRF).
-- **Host actions.** There are exactly two (`internal/hostverb`), and both call the
-  template's own scripts, from its scripts directory (`TEMPLATE_SCRIPTS`): run
-  `self-check.sh`, and `tools/set-default-app.sh <host> <port>`. The second is a
-  **contract** both templates implement: the template knows where the setting is stored
-  and what to recreate (the mesh stack's Caddy and the auth stack's registrar), the console
-  only knows the path. Exit 75 means a self-check holds the lock (→ HTTP 409). A template
-  without the tool gets a read-only editor that says why. Each runs as a
+- **Host actions** (`internal/hostverb`) all call the template's own scripts, from its
+  scripts directory (`TEMPLATE_SCRIPTS`):
+  - `self-check.sh`;
+  - `tools/set-default-app.sh <host> <port>`, a **contract** both templates implement: the
+    template knows where the setting is stored and what to recreate (the mesh stack's Caddy
+    and the auth stack's registrar), the console only knows the path. Exit 75 means a
+    self-check holds the lock (→ HTTP 409);
+  - `tools/migrate.sh key | preflight --to <user@host> --json | start --to <user@host>
+    [--status-url <https>] | cancel`, the Migration page. `start` launches the pipeline as
+    a systemd unit on the host and returns; the page then reads the script's
+    `data/migrate/status.json` and log through `/mesh`. Exit 75 means a migration is
+    already running.
+
+  A template without a tool gets a read-only page that says why. Each runs as a
   one-shot container `mesh-console-runner` created from this same image with
   `--privileged --pid=host` and `nsenter -t 1 -m -u -i -n -p`, i.e. in the host's
   namespaces. Fixed argv, user input only in validated positional arguments, at most one

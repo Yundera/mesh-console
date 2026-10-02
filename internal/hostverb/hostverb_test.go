@@ -58,3 +58,43 @@ func TestSetDefaultApp(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrate(t *testing.T) {
+	const scripts = "/DATA/AppData/mesh/scripts"
+	v, err := MigrateStart(scripts, "migration@203.0.113.9", "https://orch.example.com/pcs/migration-callback?token=abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(v.Argv, "|") != "bash|/DATA/AppData/mesh/scripts/tools/migrate.sh|start|--to|migration@203.0.113.9|--status-url|https://orch.example.com/pcs/migration-callback?token=abc" {
+		t.Fatalf("argv = %q", v.Argv)
+	}
+	if v.Detached {
+		t.Fatal("start must be synchronous: the script detaches itself")
+	}
+	for _, ok := range []string{"migration@new-box.example.com", "root@2001:db8::1", "u@[2001:db8::1]"} {
+		if _, err := MigratePreflight(scripts, ok); err != nil {
+			t.Errorf("target %q refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "host", "@host", "Root@host", "u@-x", "u@a b", "u@a;b", "u@$(id)", "u@a`id`", "u@h\n", "-oProxyCommand=x@h"} {
+		if _, err := MigratePreflight(scripts, bad); err == nil {
+			t.Errorf("target %q accepted", bad)
+		}
+		if _, err := MigrateStart(scripts, bad, ""); err == nil {
+			t.Errorf("start target %q accepted", bad)
+		}
+	}
+	for _, bad := range []string{"http://x", "https://a b", "https://x/'y", "https://x/$(id)", "https://x/`id`", "ftp://x"} {
+		if _, err := MigrateStart(scripts, "u@h", bad); err == nil {
+			t.Errorf("status URL %q accepted", bad)
+		}
+	}
+	if v, err := MigrateStart(scripts, "u@h", ""); err != nil || len(v.Argv) != 5 {
+		t.Fatalf("no status URL: %+v %v", v, err)
+	}
+	for _, f := range []func(string) (Verb, error){MigrateKey, MigrateCancel} {
+		if _, err := f("/DATA/$(id)"); err == nil {
+			t.Error("bad scripts dir accepted")
+		}
+	}
+}

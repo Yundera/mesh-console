@@ -5,6 +5,7 @@
   import Email from './pages/Email.svelte'
   import Certificates from './pages/Certificates.svelte'
   import Diagnostics from './pages/Diagnostics.svelte'
+  import Migration from './pages/Migration.svelte'
 
   const pages = [
     { path: '/', label: 'Overview', component: Overview },
@@ -13,6 +14,7 @@
     { path: '/domain', label: 'Domain', component: Domain },
     { path: '/certificates', label: 'Certificates', component: Certificates },
     { path: '/diagnostics', label: 'Diagnostics', component: Diagnostics },
+    { path: '/migration', label: 'Migration', component: Migration },
   ]
 
   let path = $state(location.pathname)

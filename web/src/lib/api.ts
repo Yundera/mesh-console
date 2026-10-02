@@ -244,3 +244,64 @@ export interface Certificates {
   error?: string
   logError?: string
 }
+
+// ---- migration (internal/server/migration.go; status.json is written by the
+// template's tools/migrate.sh and passed through verbatim) -------------------
+
+export type MigrationPhase =
+  | 'starting'
+  | 'running'
+  | 'rolling_back'
+  | 'done'
+  | 'failed'
+  | 'rolled_back'
+  | 'cancelled'
+
+export interface MigrationStep {
+  key: string
+  label: string
+  /** Who serves the apps while the step runs. */
+  group: 'source' | 'down' | 'target'
+  status: 'pending' | 'running' | 'success' | 'failed' | 'skipped'
+  startedAt: string | null
+  finishedAt: string | null
+  message: string | null
+}
+
+export interface MigrationStatus {
+  version: number
+  id: string
+  phase: MigrationPhase
+  startedAt: string | null
+  finishedAt: string | null
+  source: { ip: string | null; domain: string | null }
+  target: { host: string; user: string }
+  steps: MigrationStep[]
+  copy: { bytes: number; percent: number; rate: string | null; eta: string | null }
+  error: string | null
+  updatedAt: string
+}
+
+export interface Migration {
+  available: boolean
+  reason?: string
+  key?: string
+  status?: MigrationStatus
+  /** On a box that was migrated onto: the run that brought it here. */
+  arrived?: MigrationStatus
+  log?: string[]
+  /** MESH_ROUTING_HOLD: migrating:<id> or retired:<ip>. */
+  hold?: string
+}
+
+export interface PreflightCheck {
+  name: string
+  status: 'ok' | 'warn' | 'fail'
+  message: string
+}
+
+export interface Preflight {
+  ok: boolean
+  target: string
+  checks: PreflightCheck[]
+}

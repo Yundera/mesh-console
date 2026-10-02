@@ -97,6 +97,11 @@ func (s *Server) routes(uiFS fs.FS) http.Handler {
 		api.Get("/certificates", s.handleCertificates)
 		api.Get("/mail", s.handleMail)
 		api.Post("/mail/test", s.handleMailTest)
+		api.Get("/migration", s.handleMigration)
+		api.Post("/migration/key", s.handleMigrationKey)
+		api.Post("/migration/preflight", s.handleMigrationPreflight)
+		api.Post("/migration/start", s.handleMigrationStart)
+		api.Post("/migration/cancel", s.handleMigrationCancel)
 		api.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 			writeError(w, http.StatusNotFound, "not found")
 		})

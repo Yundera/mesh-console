@@ -202,3 +202,59 @@ func TestStatus(t *testing.T) {
 		}
 	}
 }
+
+// The page reads what migrate.sh leaves in the mesh root; a template without
+// the tool gets the reason and no verb runs.
+func TestMigration(t *testing.T) {
+	dir := meshFixture(t)
+	mig := filepath.Join(dir, "data", "migrate")
+	if err := os.MkdirAll(filepath.Join(mig, "arrived"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(mig, "id_ed25519.pub"), []byte("ssh-ed25519 AAAA mesh-migrate@alice\n"), 0o644)
+	os.WriteFile(filepath.Join(mig, "status.json"), []byte(`{"version":1,"phase":"running","steps":[]}`+"\n"), 0o644)
+	os.WriteFile(filepath.Join(mig, "arrived", "status.json"), []byte(`{"truncated`), 0o644)
+	os.WriteFile(filepath.Join(mig, "migrate.log"), []byte("[2026-10-02 10:00:00] [INFO] hello\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, ".env"), []byte("DOMAIN=alice.nsl.sh\nMESH_ROUTING_HOLD=retired:203.0.113.9\n"), 0o600)
+
+	h := testServer(t, config.Config{DevIdentity: "dev", Env: "development", MeshDir: dir, MeshHostRoot: "/DATA/AppData/mesh"})
+	rec := do(h, http.MethodGet, "/api/migration", nil)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET = %d %s", rec.Code, body)
+	}
+	for _, want := range []string{`"available":false`, `"key":"ssh-ed25519 AAAA mesh-migrate@alice"`, `"status":{"version":1,"phase":"running","steps":[]}`, `"hold":"retired:203.0.113.9"`, `hello`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("GET body lacks %s: %s", want, body)
+		}
+	}
+	if strings.Contains(body, `"arrived"`) {
+		t.Errorf("invalid arrived/status.json passed through: %s", body)
+	}
+	rec = do(h, http.MethodPost, "/api/migration/start", map[string]string{"X-Mesh-Console": "1"})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("start without the tool = %d %s", rec.Code, rec.Body)
+	}
+
+	// With the tool: a bad target is refused before anything runs.
+	tool := filepath.Join(dir, "scripts", "tools", "migrate.sh")
+	os.MkdirAll(filepath.Dir(tool), 0o755)
+	os.WriteFile(tool, []byte("#!/bin/bash\n"), 0o755)
+	req := httptest.NewRequest(http.MethodPost, "/api/migration/start", strings.NewReader(`{"target":"u@a;b"}`))
+	req.Header.Set("X-Mesh-Console", "1")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("bad target = %d %s", rr.Code, rr.Body)
+	}
+}
+
+func TestLastJSONLine(t *testing.T) {
+	out := "SSH to h failed (attempt 1/8), retrying in 10s\n{\"ok\":true,\"checks\":[]}\n"
+	if got := string(lastJSONLine(out)); got != `{"ok":true,"checks":[]}` {
+		t.Fatalf("got %q", got)
+	}
+	if lastJSONLine("no verdict\n{broken") != nil {
+		t.Fatal("broken JSON accepted")
+	}
+}

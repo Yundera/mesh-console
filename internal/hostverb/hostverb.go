@@ -91,3 +91,61 @@ func checkRoot(p string) error {
 	}
 	return nil
 }
+
+// MigrateTool is the template's box-migration script, relative to its scripts
+// directory (the mesh template's tools/migrate.sh, which a Yundera PCS runs
+// unmodified). The console only drives it; the pipeline, its state
+// (data/migrate/status.json) and its log are the template's.
+const MigrateTool = "tools/migrate.sh"
+
+// targetRe is user@host as migrate.sh itself validates it: a POSIX user name,
+// then a hostname or an IP (IPv6 bare or bracketed).
+var targetRe = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}@(\[?[0-9a-fA-F:]+\]?|[a-zA-Z0-9][a-zA-Z0-9.-]{0,252})$`)
+
+// statusURLRe: an https URL with nothing a shell or the script would treat
+// specially. Optional - it is where a control plane wants progress pushed.
+var statusURLRe = regexp.MustCompile(`^https://[^\s"'` + "`" + `$\\]+$`)
+
+func migrate(scripts, name string, args ...string) (Verb, error) {
+	if err := checkRoot(scripts); err != nil {
+		return Verb{}, err
+	}
+	return Verb{Name: name, Argv: append([]string{"bash", path.Join(scripts, MigrateTool)}, args...)}, nil
+}
+
+// MigrateKey creates this box's migration keypair if it has none and prints the
+// public key - what the target account must accept.
+func MigrateKey(scripts string) (Verb, error) {
+	return migrate(scripts, "migrate-key", "key")
+}
+
+// MigratePreflight checks the target and changes nothing; JSON on stdout.
+func MigratePreflight(scripts, target string) (Verb, error) {
+	if !targetRe.MatchString(target) {
+		return Verb{}, fmt.Errorf("invalid target %q (expected user@host)", target)
+	}
+	return migrate(scripts, "migrate-preflight", "preflight", "--to", target, "--json")
+}
+
+// MigrateStart launches the migration as a systemd unit on the host and returns
+// at once (exit 75 when one is already running), so the runner is not held for
+// the hours a copy can take.
+func MigrateStart(scripts, target, statusURL string) (Verb, error) {
+	if !targetRe.MatchString(target) {
+		return Verb{}, fmt.Errorf("invalid target %q (expected user@host)", target)
+	}
+	args := []string{"start", "--to", target}
+	if statusURL != "" {
+		if len(statusURL) > 2048 || !statusURLRe.MatchString(statusURL) {
+			return Verb{}, errors.New("invalid status URL: https only, no spaces or quotes")
+		}
+		args = append(args, "--status-url", statusURL)
+	}
+	return migrate(scripts, "migrate-start", args...)
+}
+
+// MigrateCancel asks a running migration to stop at its next safe point and
+// roll back.
+func MigrateCancel(scripts string) (Verb, error) {
+	return migrate(scripts, "migrate-cancel", "cancel")
+}
