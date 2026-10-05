@@ -91,6 +91,7 @@ func (s *Server) routes(uiFS fs.FS) http.Handler {
 		api.Get("/stack", s.handleStack)
 		api.Get("/update", s.handleUpdate)
 		api.Post("/update/run", s.handleUpdateRun)
+		api.Post("/update/channel", s.handleSetUpdateChannel)
 		api.Get("/selfcheck", s.handleSelfCheck)
 		api.Get("/domain", s.handleDomain)
 		api.Post("/domain/default-app", s.handleSetDefaultApp)

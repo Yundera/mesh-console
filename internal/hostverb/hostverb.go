@@ -14,6 +14,7 @@ import (
 	"path"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 type Verb struct {
@@ -81,6 +82,45 @@ func SetDefaultApp(scripts, host string, port int) (Verb, error) {
 		Name: "set-default-app",
 		Argv: []string{"bash", path.Join(scripts, SetDefaultAppTool), host, strconv.Itoa(port)},
 	}, nil
+}
+
+// SetUpdateChannelTool is the template's action for its update source, relative
+// to its scripts directory: `<stable|dev|local|custom> [url]`, exit 0 saved,
+// 2 bad arguments, ExitBusy while a self-check runs. What each channel writes
+// (UPDATE_URL, MESH_AUTO_UPDATE) is the template's business.
+const SetUpdateChannelTool = "tools/set-update-channel.sh"
+
+// Channels are the names the tool accepts.
+var Channels = []string{"stable", "dev", "local", "custom"}
+
+// channelURLRe is the tool's own rule: https or a host file, nothing a shell or
+// compose's .env interpolation would treat specially.
+var channelURLRe = regexp.MustCompile(`^(https|file)://[A-Za-z0-9._~:/?#@!&()*+,;=%-]+$`)
+
+// SetUpdateChannel switches the template's update source. url is required for
+// "custom" and refused for the others.
+func SetUpdateChannel(scripts, channel, url string) (Verb, error) {
+	if err := checkRoot(scripts); err != nil {
+		return Verb{}, err
+	}
+	argv := []string{"bash", path.Join(scripts, SetUpdateChannelTool), channel}
+	switch channel {
+	case "stable", "dev", "local":
+		if url != "" {
+			return Verb{}, fmt.Errorf("channel %q takes no url", channel)
+		}
+	case "custom":
+		if len(url) > 2048 || !channelURLRe.MatchString(url) {
+			return Verb{}, errors.New("invalid url: https:// or file://, no spaces or quotes")
+		}
+		if strings.HasSuffix(url, ".zip") {
+			return Verb{}, errors.New("invalid url: the template is a .tar.gz, not a .zip")
+		}
+		argv = append(argv, url)
+	default:
+		return Verb{}, fmt.Errorf("unknown channel %q", channel)
+	}
+	return Verb{Name: "set-update-channel", Argv: argv}, nil
 }
 
 var rootRe = regexp.MustCompile(`^/[a-zA-Z0-9/_.-]+$`)

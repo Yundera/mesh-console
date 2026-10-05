@@ -98,3 +98,34 @@ func TestMigrate(t *testing.T) {
 		}
 	}
 }
+
+func TestSetUpdateChannel(t *testing.T) {
+	const scripts = "/DATA/AppData/mesh/scripts"
+	v, err := SetUpdateChannel(scripts, "dev", "")
+	if err != nil || strings.Join(v.Argv, "|") != "bash|/DATA/AppData/mesh/scripts/tools/set-update-channel.sh|dev" {
+		t.Fatalf("dev: %+v %v", v, err)
+	}
+	const u = "https://github.com/yundera/mesh-router-template-root/archive/refs/heads/feat-x.tar.gz"
+	v, err = SetUpdateChannel(scripts, "custom", u)
+	if err != nil || v.Argv[len(v.Argv)-1] != u || v.Detached {
+		t.Fatalf("custom: %+v %v", v, err)
+	}
+	if _, err := SetUpdateChannel(scripts, "custom", "file:///root/mesh-test/t.tar.gz"); err != nil {
+		t.Fatalf("file url refused: %v", err)
+	}
+
+	for _, bad := range []struct{ ch, url string }{
+		{"", ""}, {"main", ""}, {"stable;id", ""}, {"stable", u}, {"local", u},
+		{"custom", ""}, {"custom", "http://x/y.tar.gz"}, {"custom", "https://x/a b.tar.gz"},
+		{"custom", "https://x/$(id).tar.gz"}, {"custom", "https://x/a`id`"}, {"custom", "https://x/a'b"},
+		{"custom", "https://x/a\nb"}, {"custom", "https://x/a\\b"}, {"custom", "https://github.com/Yundera/template-root/archive/refs/heads/main.zip"},
+		{"custom", "https://x/" + strings.Repeat("a", 2048)},
+	} {
+		if _, err := SetUpdateChannel(scripts, bad.ch, bad.url); err == nil {
+			t.Errorf("accepted %q %q", bad.ch, bad.url)
+		}
+	}
+	if _, err := SetUpdateChannel("/DATA/$(id)", "stable", ""); err == nil {
+		t.Error("bad scripts dir accepted")
+	}
+}

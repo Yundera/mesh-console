@@ -216,7 +216,102 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "cannot read mesh .env: "+err.Error())
 		return
 	}
-	out, _ := s.gatherUpdate(r.Context(), env, r.URL.Query().Get("refresh") == "1")
+	refresh := r.URL.Query().Get("refresh") == "1"
+	out, _ := s.gatherUpdate(r.Context(), env, refresh)
+	out["channel"] = update.Channel(env.Get("UPDATE_URL", "MESH_TEMPLATE_URL"), update.AutoUpdateEnabled(env.Get("MESH_AUTO_UPDATE")))
+	out["channelEditable"], out["channelBlocked"] = s.channelEditable(env)
+	out["channels"] = s.publishedChannels(r.Context(), refresh)
+	writeJSON(w, http.StatusOK, out)
+}
+
+type channelHead struct {
+	ID          string         `json:"id"`
+	URL         string         `json:"url"`
+	Latest      *update.Latest `json:"latest"`
+	LatestError string         `json:"latestError,omitempty"`
+}
+
+// publishedChannels is the head of each published branch, so the picker can
+// say what switching would install. Both go through the hour-long GitHub cache.
+func (s *Server) publishedChannels(ctx context.Context, refresh bool) []channelHead {
+	var out []channelHead
+	for _, c := range []struct{ id, url string }{{"stable", update.DefaultUpdateURL}, {"dev", update.DevUpdateURL}} {
+		h := channelHead{ID: c.id, URL: c.url}
+		if repo, ok := update.ParseRepo(c.url); ok {
+			if l, err := s.github.Latest(ctx, repo, refresh); err != nil {
+				h.LatestError = err.Error()
+			} else {
+				h.Latest = &l
+			}
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
+// channelEditable says whether the channel picker can work on this box, and why
+// not. Like the default-app editor, it needs the template's own action.
+func (s *Server) channelEditable(env meshenv.Env) (bool, string) {
+	if env.Get("MESH_WINDOWS_MODE") == "true" {
+		return false, "not available in Windows mode"
+	}
+	if !s.templateHasTool(hostverb.SetUpdateChannelTool) {
+		return false, "this box's template does not ship " + hostverb.SetUpdateChannelTool + " yet - it arrives with a template update"
+	}
+	return true, ""
+}
+
+func (s *Server) handleSetUpdateChannel(w http.ResponseWriter, r *http.Request) {
+	env, err := s.env()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot read mesh .env: "+err.Error())
+		return
+	}
+	if ok, why := s.channelEditable(env); !ok {
+		writeError(w, http.StatusForbidden, "changing the update channel is "+why)
+		return
+	}
+	var body struct {
+		Channel string `json:"channel"`
+		URL     string `json:"url"`
+		// Run starts a self-check right after saving, so the box moves to the
+		// new source now rather than at the nightly run.
+		Run bool `json:"run"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	verb, err := hostverb.SetUpdateChannel(s.cfg.Scripts(), body.Channel, strings.TrimSpace(body.URL))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	res, err := s.runVerb(r.Context(), verb)
+	if err != nil {
+		s.verbError(w, err)
+		return
+	}
+	if res.ExitCode == hostverb.ExitBusy {
+		writeError(w, http.StatusConflict, "a self-check is running on this box - try again once it has finished")
+		return
+	}
+	if res.ExitCode != 0 {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "the template refused the channel", "result": res})
+		return
+	}
+	out := map[string]any{"result": res, "started": false}
+	if body.Run {
+		sc, err := hostverb.SelfCheck(s.cfg.Scripts(), s.cfg.SelfCheckScript)
+		if err == nil {
+			_, err = s.runVerb(r.Context(), sc)
+		}
+		if err != nil {
+			out["startError"] = err.Error()
+		} else {
+			out["started"] = true
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -375,14 +470,22 @@ func (s *Server) defaultAppEditable() (bool, string) {
 	if !s.cfg.DefaultAppEdit {
 		return false, "disabled on this box (DEFAULT_APP_EDIT=false)"
 	}
-	rel, err := filepath.Rel(s.cfg.MeshHostRoot, s.cfg.Scripts())
-	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
-		return true, ""
-	}
-	if _, err := os.Stat(filepath.Join(s.cfg.MeshDir, rel, hostverb.SetDefaultAppTool)); err != nil {
+	if !s.templateHasTool(hostverb.SetDefaultAppTool) {
 		return false, "this box's template does not ship " + hostverb.SetDefaultAppTool + " yet - it arrives with a template update"
 	}
 	return true, ""
+}
+
+// templateHasTool looks for a template action (a path relative to the scripts
+// directory) through the /mesh mount. A scripts directory the mount does not
+// cover is assumed to have it, and the verb reports otherwise.
+func (s *Server) templateHasTool(tool string) bool {
+	rel, err := filepath.Rel(s.cfg.MeshHostRoot, s.cfg.Scripts())
+	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return true
+	}
+	_, err = os.Stat(filepath.Join(s.cfg.MeshDir, rel, tool))
+	return err == nil
 }
 
 func (s *Server) handleSetDefaultApp(w http.ResponseWriter, r *http.Request) {

@@ -115,7 +115,13 @@ export interface UpdateInfo {
   latest: { commit: string; date?: string; message?: string; checkedAt: string } | null
   latestError?: string
   state: 'up-to-date' | 'outdated' | 'unknown'
+  channel: Channel
+  channelEditable: boolean
+  channelBlocked?: string
+  channels: { id: 'stable' | 'dev'; url: string; latest: UpdateInfo['latest']; latestError?: string }[]
 }
+
+export type Channel = 'stable' | 'dev' | 'local' | 'custom'
 
 export interface Step {
   name: string

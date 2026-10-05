@@ -26,6 +26,26 @@ import (
 // DefaultUpdateURL mirrors mesh_template_url() in scripts/library/common.sh.
 const DefaultUpdateURL = "https://github.com/yundera/mesh-router-template-root/archive/refs/heads/stable.tar.gz"
 
+// DevUpdateURL is the main branch: what tools/set-update-channel.sh writes for
+// the "dev" channel.
+const DevUpdateURL = "https://github.com/yundera/mesh-router-template-root/archive/refs/heads/main.tar.gz"
+
+// Channel names the update source the way the channel picker shows it: "local"
+// when downloads are off (whatever UPDATE_URL says), "stable"/"dev" for the two
+// published branches, "custom" for anything else.
+func Channel(updateURL string, autoUpdate bool) string {
+	if !autoUpdate {
+		return "local"
+	}
+	switch u := strings.TrimSpace(updateURL); {
+	case u == "" || strings.EqualFold(u, DefaultUpdateURL):
+		return "stable"
+	case strings.EqualFold(u, DevUpdateURL):
+		return "dev"
+	}
+	return "custom"
+}
+
 type Revision struct {
 	URL      string  `json:"url"`
 	Commit   *string `json:"commit"`

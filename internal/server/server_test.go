@@ -258,3 +258,26 @@ func TestLastJSONLine(t *testing.T) {
 		t.Fatal("broken JSON accepted")
 	}
 }
+
+// The channel picker needs the template's own action, like the default-app
+// editor; with it, input is still validated before any runner starts.
+func TestUpdateChannelNeedsTemplateTool(t *testing.T) {
+	cfg := config.Config{DevIdentity: "dev", Env: "development", MeshDir: meshFixture(t), MeshHostRoot: "/DATA/AppData/mesh"}
+	h := testServer(t, cfg)
+	rec := do(h, http.MethodPost, "/api/update/channel", map[string]string{"X-Mesh-Console": "1"})
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "set-update-channel.sh") {
+		t.Fatalf("missing tool = %d %s", rec.Code, rec.Body)
+	}
+
+	tool := filepath.Join(cfg.MeshDir, "scripts", "tools", "set-update-channel.sh")
+	if err := os.MkdirAll(filepath.Dir(tool), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tool, []byte("#!/bin/bash\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec = do(h, http.MethodPost, "/api/update/channel", map[string]string{"X-Mesh-Console": "1"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty channel = %d %s, want 400", rec.Code, rec.Body)
+	}
+}

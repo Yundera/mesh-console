@@ -107,3 +107,22 @@ services:
 		t.Fatalf("pins = %+v %v", pins, err)
 	}
 }
+
+func TestChannel(t *testing.T) {
+	for _, c := range []struct {
+		url  string
+		auto bool
+		want string
+	}{
+		{"", true, "stable"},
+		{DefaultUpdateURL, true, "stable"},
+		{DevUpdateURL, true, "dev"},
+		{"https://github.com/yundera/mesh-router-template-root/archive/refs/heads/feat.tar.gz", true, "custom"},
+		{"file:///root/mesh-test/t.tar.gz", true, "custom"},
+		{DevUpdateURL, false, "local"},
+	} {
+		if got := Channel(c.url, c.auto); got != c.want {
+			t.Errorf("Channel(%q, %v) = %q, want %q", c.url, c.auto, got, c.want)
+		}
+	}
+}
