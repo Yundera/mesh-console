@@ -220,7 +220,9 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	out, _ := s.gatherUpdate(r.Context(), env, refresh)
 	out["channel"] = update.Channel(env.Get("UPDATE_URL", "MESH_TEMPLATE_URL"), update.AutoUpdateEnabled(env.Get("MESH_AUTO_UPDATE")))
 	out["channelEditable"], out["channelBlocked"] = s.channelEditable(env)
-	out["channels"] = s.publishedChannels(r.Context(), refresh)
+	if _, managed := out["managedBy"]; !managed {
+		out["channels"] = s.publishedChannels(r.Context(), refresh)
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -252,6 +254,9 @@ func (s *Server) publishedChannels(ctx context.Context, refresh bool) []channelH
 // channelEditable says whether the channel picker can work on this box, and why
 // not. Like the default-app editor, it needs the template's own action.
 func (s *Server) channelEditable(env meshenv.Env) (bool, string) {
+	if by := env.Get("MESH_UPDATES_MANAGED_BY"); by != "" {
+		return false, "managed by " + by
+	}
 	if env.Get("MESH_WINDOWS_MODE") == "true" {
 		return false, "not available in Windows mode"
 	}
@@ -331,6 +336,16 @@ func (s *Server) gatherUpdate(ctx context.Context, env meshenv.Env, refresh bool
 	}
 	out["installed"] = installed
 	out["templateSyncedAt"] = update.TemplateSyncedAt(s.cfg.MeshDir)
+
+	// An operator drives the version: show what it pinned, never ask GitHub for
+	// a branch head this box is not allowed to move to.
+	if managedBy := env.Get("MESH_UPDATES_MANAGED_BY"); managedBy != "" {
+		out["managedBy"] = managedBy
+		out["pinned"] = update.PinnedCommit(updateURL)
+		out["latest"] = nil
+		out["state"] = update.Managed
+		return out, update.Managed
+	}
 
 	var latest *update.Latest
 	if repo, ok := update.ParseRepo(updateURL); ok {

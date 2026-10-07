@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -123,6 +124,21 @@ func TestChannel(t *testing.T) {
 	} {
 		if got := Channel(c.url, c.auto); got != c.want {
 			t.Errorf("Channel(%q, %v) = %q, want %q", c.url, c.auto, got, c.want)
+		}
+	}
+}
+
+func TestPinnedCommit(t *testing.T) {
+	sha := "1c45187aa0b1c2d3e4f5061728394a5b6c7d8e9f"
+	for _, c := range []struct{ url, want string }{
+		{"https://github.com/yundera/mesh-router-template-root/archive/" + sha + ".tar.gz", sha},
+		{"https://github.com/yundera/mesh-router-template-root/archive/" + strings.ToUpper(sha) + ".tar.gz", sha},
+		{DevUpdateURL, ""},
+		{"https://github.com/yundera/mesh-router-template-root/archive/1c45187.tar.gz", ""},
+		{"file:///root/mesh-test/t.tar.gz", ""},
+	} {
+		if got := PinnedCommit(c.url); got != c.want {
+			t.Errorf("PinnedCommit(%q) = %q, want %q", c.url, got, c.want)
 		}
 	}
 }

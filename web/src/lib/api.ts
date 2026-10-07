@@ -114,11 +114,16 @@ export interface UpdateInfo {
   repo?: string
   latest: { commit: string; date?: string; message?: string; checkedAt: string } | null
   latestError?: string
-  state: 'up-to-date' | 'outdated' | 'unknown'
+  state: 'up-to-date' | 'outdated' | 'unknown' | 'managed'
+  // Set when an operator drives this box's updates (MESH_UPDATES_MANAGED_BY):
+  // the page is read-only and `pinned` is the commit UPDATE_URL names, if any.
+  managedBy?: string
+  pinned?: string
   channel: Channel
   channelEditable: boolean
   channelBlocked?: string
-  channels: { id: 'stable' | 'dev'; url: string; latest: UpdateInfo['latest']; latestError?: string }[]
+  // Absent on a managed box.
+  channels?: { id: 'stable' | 'dev'; url: string; latest: UpdateInfo['latest']; latestError?: string }[]
 }
 
 export type Channel = 'stable' | 'dev' | 'local' | 'custom'

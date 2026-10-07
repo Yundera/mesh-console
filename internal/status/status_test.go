@@ -42,6 +42,11 @@ func TestCompute(t *testing.T) {
 		{"offline", func(in *Inputs) { in.Routing = &routing.State{Mode: routing.ModeOffline} }, Bad, Reachability, Bad, "Offline", 1},
 		{"backend unreachable is unknown, not bad", func(in *Inputs) { in.Routing = nil }, OK, Reachability, Unknown, "Unknown", 1},
 		{"update available", func(in *Inputs) { in.Update = update.Outdated }, Warn, Updates, Warn, "Update available", 1},
+		{"managed box is fine without a version check", func(in *Inputs) { in.Update = update.Managed; in.ManagedBy = "Yundera" }, OK, Updates, OK, "Managed", 0},
+		{"failed run still shows on a managed box", func(in *Inputs) {
+			in.Update = update.Managed
+			in.LastRun = &selfcheck.Run{Status: selfcheck.RunFailed, LastLine: now}
+		}, Warn, Updates, Warn, "Last update failed", 1},
 		{"unknown update state does not alarm", func(in *Inputs) { in.Update = update.Unknown }, OK, Updates, Unknown, "Unknown", 0},
 		{"drift wins over outdated", func(in *Inputs) {
 			in.Update = update.Outdated

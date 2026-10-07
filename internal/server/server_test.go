@@ -281,3 +281,33 @@ func TestUpdateChannelNeedsTemplateTool(t *testing.T) {
 		t.Fatalf("empty channel = %d %s, want 400", rec.Code, rec.Body)
 	}
 }
+
+// A box whose updates an operator drives: the page is read-only, nothing is
+// asked of GitHub, and the template action is refused before it is even looked
+// for.
+func TestUpdateManaged(t *testing.T) {
+	dir := meshFixture(t)
+	pin := "https://github.com/yundera/mesh-router-template-root/archive/1c45187aa0b1c2d3e4f5061728394a5b6c7d8e9f.tar.gz"
+	env := "DOMAIN=alice.nsl.sh\nUPDATE_URL=" + pin + "\nMESH_UPDATES_MANAGED_BY=Yundera\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{DevIdentity: "dev", Env: "development", MeshDir: dir, MeshHostRoot: "/DATA/AppData/mesh"}
+	h := testServer(t, cfg)
+
+	rec := do(h, http.MethodGet, "/api/update", map[string]string{"X-Mesh-Console": "1"})
+	body := rec.Body.String()
+	for _, want := range []string{`"managedBy":"Yundera"`, `"state":"managed"`, `"pinned":"1c45187aa0b1c2d3e4f5061728394a5b6c7d8e9f"`, `"channelEditable":false`, `"channelBlocked":"managed by Yundera"`} {
+		if rec.Code != http.StatusOK || !strings.Contains(body, want) {
+			t.Fatalf("GET /api/update = %d %s, want %s", rec.Code, body, want)
+		}
+	}
+	if strings.Contains(body, `"channels"`) {
+		t.Fatalf("managed box listed channel heads: %s", body)
+	}
+
+	rec = do(h, http.MethodPost, "/api/update/channel", map[string]string{"X-Mesh-Console": "1"})
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "managed by Yundera") {
+		t.Fatalf("POST channel on managed box = %d %s, want 403", rec.Code, rec.Body)
+	}
+}

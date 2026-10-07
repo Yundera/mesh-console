@@ -91,6 +91,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Now:           time.Now(),
 		Routing:       rr.state,
 		Update:        upState,
+		ManagedBy:     env.Get("MESH_UPDATES_MANAGED_BY"),
 		StackErr:      stackErr != nil,
 		LastRun:       sc.lastFinished(),
 		UpdateRunning: sc.running || sc.runnerBusy,

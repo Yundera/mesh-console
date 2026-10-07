@@ -195,7 +195,23 @@ const (
 	UpToDate State = "up-to-date"
 	Outdated State = "outdated"
 	Unknown  State = "unknown"
+	// Managed: an operator drives this box's version (MESH_UPDATES_MANAGED_BY),
+	// so "is there something newer" is not this box's question.
+	Managed State = "managed"
 )
+
+// pinnedRe is a commit tarball, the form an operator pins UPDATE_URL to:
+// https://github.com/<o>/<r>/archive/<sha>.tar.gz
+var pinnedRe = regexp.MustCompile(`^https://github\.com/[^/]+/[^/]+/archive/([0-9a-fA-F]{40})\.tar\.gz$`)
+
+// PinnedCommit is the commit an UPDATE_URL pins, or "" when it is not a commit
+// tarball (a branch, a file:// test tree, ...).
+func PinnedCommit(updateURL string) string {
+	if m := pinnedRe.FindStringSubmatch(strings.TrimSpace(updateURL)); m != nil {
+		return strings.ToLower(m[1])
+	}
+	return ""
+}
 
 // Compare decides the headline. Unknown whenever either side is missing.
 func Compare(installed *Revision, latest *Latest) State {

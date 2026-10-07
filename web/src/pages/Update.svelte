@@ -134,8 +134,20 @@
     }
   }
 
-  const stateTone = (s: UpdateInfo['state']) => (s === 'up-to-date' ? 'ok' : s === 'outdated' ? 'warn' : 'neutral')
-  const stateLabel = (s: UpdateInfo['state']) => (s === 'up-to-date' ? 'Up to date' : s === 'outdated' ? 'Update available' : 'Unknown')
+  const stateTone = (s: UpdateInfo['state']) =>
+    s === 'up-to-date' || s === 'managed' ? 'ok' : s === 'outdated' ? 'warn' : 'neutral'
+  const stateLabel = (s: UpdateInfo['state']) =>
+    s === 'up-to-date'
+      ? 'Up to date'
+      : s === 'outdated'
+        ? 'Update available'
+        : s === 'managed'
+          ? `Managed by ${info?.managedBy}`
+          : 'Unknown'
+  // The installed tree is not the one the operator pinned yet: the next self-check moves it.
+  const pinPending = $derived(
+    !!info?.managedBy && !!info.pinned && !!info.installed?.commit && info.installed.commit.toLowerCase() !== info.pinned,
+  )
   const runTone = (s: Run['status']) => (s === 'success' ? 'ok' : s === 'failed' ? 'bad' : s === 'interrupted' ? 'warn' : 'info')
   const stepTone = (s: string) => (s === 'success' ? 'ok' : s === 'failed' ? 'bad' : 'info')
 </script>
@@ -143,7 +155,9 @@
 <div class="stack">
   <Card title="Template version">
     {#snippet actions()}
-      <button onclick={() => loadInfo(true)} disabled={refreshing}>{refreshing ? 'Checking…' : 'Check now'}</button>
+      {#if !info?.managedBy}
+        <button onclick={() => loadInfo(true)} disabled={refreshing}>{refreshing ? 'Checking…' : 'Check now'}</button>
+      {/if}
     {/snippet}
     {#if infoError}
       <p class="error">{infoError}</p>
@@ -152,7 +166,7 @@
     {:else}
       <div class="headline">
         <Pill tone={stateTone(info.state)}>{stateLabel(info.state)}</Pill>
-        {#if !info.autoUpdate}<Pill tone="warn">auto-update off</Pill>{/if}
+        {#if !info.autoUpdate && !info.managedBy}<Pill tone="warn">auto-update off</Pill>{/if}
       </div>
       <dl class="kv">
         <dt>Installed</dt>
@@ -169,6 +183,17 @@
             </span>
           {/if}
         </dd>
+        {#if info.managedBy}
+          <dt>Target</dt>
+          <dd>
+            {#if info.pinned}
+              <span class="mono">{shortSha(info.pinned)}</span>
+              <span class="subtle">set by {info.managedBy}{pinPending ? ' · installed at the next self-check' : ''}</span>
+            {:else}
+              <span class="subtle">set by {info.managedBy}</span>
+            {/if}
+          </dd>
+        {:else}
         <dt>Latest</dt>
         <dd>
           {#if info.latest}
@@ -179,15 +204,23 @@
             <span class="subtle">{info.latestError ?? '—'}</span>
           {/if}
         </dd>
+        {/if}
         <dt>Source</dt>
         <dd>
-          <Pill tone="neutral">{CHANNELS.find((c) => c.id === info?.channel)?.label ?? info.channel}</Pill>
+          {#if !info.managedBy}
+            <Pill tone="neutral">{CHANNELS.find((c) => c.id === info?.channel)?.label ?? info.channel}</Pill>
+          {/if}
           {#if info.repo}<span class="mono">{info.repo}</span>{:else}<span class="mono">{info.updateUrl}</span>{/if}
         </dd>
         <dt>Nightly check</dt>
         <dd>{info.cron === 'disabled' || info.cron === 'off' ? 'disabled' : `cron ${info.cron || '0 3 * * *'}`}</dd>
       </dl>
-      {#if !info.autoUpdate}
+      {#if info.managedBy}
+        <p class="muted small">
+          Updates on this box are managed by {info.managedBy}: it decides which version is installed and when. Nothing
+          on this page changes that.
+        </p>
+      {:else if !info.autoUpdate}
         <p class="muted small">
           MESH_AUTO_UPDATE is off: running the self-check repairs and restarts the stack but does not download a new
           template.
@@ -196,6 +229,7 @@
     {/if}
   </Card>
 
+  {#if !info?.managedBy}
   <Card title="Update channel">
     <p class="muted small">
       Where this box takes its template from. Saving only changes the source; the box moves to it at the next
@@ -274,17 +308,25 @@
       {/if}
     {/if}
   </Card>
+  {/if}
 
   <Card title="Self-check">
     {#snippet actions()}
       <button class="primary" onclick={runUpdate} disabled={running || info?.windowsMode}>
-        {running ? 'Running…' : 'Update now'}
+        {running ? 'Running…' : info?.managedBy ? 'Run self-check' : 'Update now'}
       </button>
     {/snippet}
-    <p class="muted small">
-      Runs the same self-check as the nightly job: syncs the template, applies migrations, pulls images and brings every
-      stack up. Services — this console included — may restart while it runs.
-    </p>
+    {#if info?.managedBy}
+      <p class="muted small">
+        Repairs the box: re-syncs the version {info.managedBy} has set, pulls images and brings every stack up. It never
+        moves to a newer version on its own. Services — this console included — may restart while it runs.
+      </p>
+    {:else}
+      <p class="muted small">
+        Runs the same self-check as the nightly job: syncs the template, applies migrations, pulls images and brings
+        every stack up. Services — this console included — may restart while it runs.
+      </p>
+    {/if}
     {#if startError}<p class="error">{startError}</p>{/if}
     {#if unreachableSince !== null}
       <p><Pill tone="info">console restarting</Pill> <span class="subtle">reconnecting…</span></p>

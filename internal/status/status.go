@@ -86,6 +86,8 @@ type Inputs struct {
 	Routing *routing.State
 
 	Update update.State
+	// ManagedBy names the operator driving this box's updates, "" when none.
+	ManagedBy string
 
 	// Containers is nil when the Docker socket could not be listed.
 	Containers []Container
@@ -199,6 +201,8 @@ func updates(in Inputs, add addFn) Tile {
 	case drift > 0:
 		t = Tile{Level: Warn, Label: "Update pending", Detail: plural(drift, "component") + " waiting to restart"}
 		add(Warn, Updates, link, "An update was downloaded but is not running yet. It applies at the next update run, or start one now.")
+	case in.Update == update.Managed:
+		t = Tile{Level: OK, Label: "Managed", Detail: "Updates are managed by " + in.ManagedBy}
 	case in.Update == update.Outdated:
 		t = Tile{Level: Warn, Label: "Update available"}
 		add(Warn, Updates, link, "A newer version is available.")
