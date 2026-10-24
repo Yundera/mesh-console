@@ -6,19 +6,21 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/yundera/mesh-console/internal/backend"
 	"github.com/yundera/mesh-console/internal/certs"
 	"github.com/yundera/mesh-console/internal/hostverb"
 	"github.com/yundera/mesh-console/internal/meshenv"
+	"github.com/yundera/mesh-console/internal/probe"
 )
 
 // ---- how the box is reached ----------------------------------------------
 //
-// Two additions to the routing answer: the owner's routing force (the
-// template's tools/set-routing-mode.sh, hostverb.SetRoutingModeTool) and the
-// certificate Caddy serves on the box domain.
+// Additions to the routing answer: the owner's routing force (the template's
+// tools/set-routing-mode.sh, hostverb.SetRoutingModeTool), the certificate
+// Caddy serves on the box domain, and traced requests to the box's public names.
 
 // routingForce is MESH_ROUTING_FORCE as the template applies it, plus a pending
 // revert read from the tool's state file. The .env is the truth: the state file
@@ -176,4 +178,63 @@ func (s *Server) handleSetRoutingForce(w http.ResponseWriter, r *http.Request) {
 		code = http.StatusBadGateway
 	}
 	writeJSON(w, code, out)
+}
+
+// ---- the path traffic actually takes ----------------------------------------
+
+type traceCache struct {
+	at     time.Time
+	domain string
+	val    []probe.Trace
+}
+
+const (
+	traceTTL      = 20 * time.Second // the page polls every 3 s during a forced-tunnel trial
+	traceFreshMin = 5 * time.Second  // Refresh may skip the cache, but not hammer the gateways
+)
+
+// traceHosts are the names traced, fixed by DOMAIN and never taken from the
+// request: the root stands for the box's own zone, mesh-console-<domain> is the
+// name this page is served on.
+func traceHosts(domain string) []string {
+	return []string{domain, "mesh-console-" + domain}
+}
+
+// traces requests the box's public names the way a visitor does (probe.TraceHost)
+// and reports the path each one took. Cached: each request crosses the gateways.
+func (s *Server) traces(ctx context.Context, env meshenv.Env, fresh bool) []probe.Trace {
+	domain := env.Get("DOMAIN")
+	if domain == "" {
+		return nil
+	}
+	s.traceMu.Lock()
+	c := s.traceCache
+	s.traceMu.Unlock()
+	if c != nil && c.domain == domain {
+		age := time.Since(c.at)
+		if age < traceFreshMin || (!fresh && age < traceTTL) {
+			return c.val
+		}
+	}
+	var boxIPs []string
+	for _, k := range []string{"PUBLIC_IP", "PUBLIC_IPV4", "PUBLIC_IPV6"} {
+		if v := env.Get(k); v != "" {
+			boxIPs = append(boxIPs, v)
+		}
+	}
+	hosts := traceHosts(domain)
+	out := make([]probe.Trace, len(hosts))
+	var wg sync.WaitGroup
+	for i, h := range hosts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out[i] = probe.TraceHost(ctx, h, boxIPs)
+		}()
+	}
+	wg.Wait()
+	s.traceMu.Lock()
+	s.traceCache = &traceCache{at: time.Now(), domain: domain, val: out}
+	s.traceMu.Unlock()
+	return out
 }

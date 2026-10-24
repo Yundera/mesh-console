@@ -88,7 +88,12 @@ func (s *Server) handleRouting(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.gatherRouting(ctx, env, true).out)
+	// The traced requests leave the box and back; run them beside the backend's answer.
+	traces := make(chan []probe.Trace, 1)
+	go func() { traces <- s.traces(ctx, env, r.URL.Query().Get("fresh") == "1") }()
+	out := s.gatherRouting(ctx, env, true).out
+	out["trace"] = <-traces
+	writeJSON(w, http.StatusOK, out)
 }
 
 type routingResult struct {

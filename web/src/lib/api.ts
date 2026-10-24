@@ -93,6 +93,26 @@ export interface Routing {
   force?: RoutingForce
   boxCert?: BoxCert
   dns?: DnsState
+  trace?: Trace[] | null
+}
+
+// Lanes of the Diagnostics route map (internal/probe/trace.go).
+export type Lane = 'box-direct' | 'edge-direct' | 'gateway-agent' | 'gateway-tunnel' | 'unknown'
+
+// A request to one of the box's public names, made from the box the way a
+// visitor makes it (internal/probe/trace.go TraceHost).
+export interface Trace {
+  host: string
+  resolved?: string[]
+  connected?: string
+  status?: number
+  route?: string[]
+  cfRay: boolean
+  entry: 'box' | 'cloudflare' | 'gateway' | 'unknown'
+  hops: string[]
+  lane: Lane
+  error?: string
+  checkedAt: string
 }
 
 // What the mesh nameservers answer for the box's names (backend /resolve/v2 `dns`,

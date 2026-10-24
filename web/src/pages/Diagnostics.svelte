@@ -1,7 +1,8 @@
 <script lang="ts">
   import Card from '../lib/Card.svelte'
   import Pill from '../lib/Pill.svelte'
-  import { api, ApiError, type Overview, type Routing, type StackContainer, type Mode, type BoxCert } from '../lib/api'
+  import RouteMap, { type Action } from '../lib/RouteMap.svelte'
+  import { api, ApiError, type Overview, type Routing, type StackContainer, type Mode } from '../lib/api'
   import { ago, dateTime } from '../lib/format'
 
   let overview = $state<Overview | null>(null)
@@ -18,10 +19,12 @@
       errors.overview = (e as Error).message
     }
   }
-  async function loadRouting() {
+  // fresh asks the server to trace the public names again rather than reuse its
+  // last answer (cached for 20 s).
+  async function loadRouting(fresh = false) {
     loadingRouting = true
     try {
-      routing = await api.get<Routing>('/api/routing')
+      routing = await api.get<Routing>(fresh ? '/api/routing?fresh=1' : '/api/routing')
       errors.routing = undefined
     } catch (e) {
       errors.routing = (e as Error).message
@@ -63,7 +66,7 @@
   // While on trial: follow the switch closely and count down.
   $effect(() => {
     if (!onTrial) return
-    const poll = setInterval(loadRouting, 3_000)
+    const poll = setInterval(() => loadRouting(), 3_000)
     const tick = setInterval(() => (now = Date.now()), 1_000)
     return () => {
       clearInterval(poll)
@@ -112,9 +115,10 @@
   let dnsSetting = $state<'gateway' | 'auto' | null>(null)
   let dnsResult = $state<{ ok: boolean; message: string; output?: string } | null>(null)
 
-  async function setDnsForce(force: 'gateway' | 'auto') {
+  async function setDnsForce(force: 'gateway' | 'auto'): Promise<boolean> {
     dnsResult = null
     dnsSetting = force
+    let ok = false
     try {
       await api.post('/api/dns/force', { force })
       dnsResult = {
@@ -124,6 +128,7 @@
             ? 'Your names now answer the gateway. Browsers follow within a minute.'
             : 'Back to automatic: your names answer the box directly when it can serve them itself.',
       }
+      ok = true
     } catch (e) {
       const body = e instanceof ApiError ? (e.body as { result?: { output?: string } } | undefined) : undefined
       dnsResult = { ok: false, message: (e as Error).message, output: body?.result?.output }
@@ -131,47 +136,28 @@
       dnsSetting = null
       await loadRouting()
     }
+    return ok
   }
 
-  function pathReason(r: Routing): string {
-    const s = r.state
-    if (!s) return ''
-    const forced = r.force?.mode === 'tunnel'
-    if (s.mode === 'direct') {
-      if (forced) return 'Tunnel forced, but the direct route still ranks first — the agent re-registers within a minute.'
-      const rt = s.gateway.route
-      return `The backend accepted the agent’s direct route${rt ? ` to ${rt.domain || rt.ip}:${rt.port}` : ''} when it registered.`
-    }
-    if (s.mode === 'tunnel' && forced)
-      return s.worker.mode === 'direct'
-        ? 'Forced: the direct route is still registered, ranked below the tunnel. The Cloudflare worker still goes direct — it only follows the tunnel from the release that honours route priority.'
-        : 'Forced: the direct route is still registered, ranked below the tunnel.'
-    return modeExplain(r)
-  }
-
-  const certKind: Record<BoxCert['kind'], string> = {
-    letsencrypt: 'Let’s Encrypt',
-    'mesh-ca': 'Mesh CA',
-    other: 'Other issuer',
-    unreachable: 'No answer',
-  }
-  function boxCertTone(c: BoxCert) {
-    if (c.kind === 'unreachable' || c.renewal === 'expired') return 'bad'
-    if (c.renewal === 'overdue') return 'warn'
-    return c.kind === 'letsencrypt' ? 'ok' : c.kind === 'mesh-ca' ? 'info' : 'warn'
-  }
-  function boxCertExplain(c: BoxCert): string {
-    switch (c.kind) {
-      case 'letsencrypt':
-        return c.method === 'dns-01'
-          ? `Publicly trusted wildcard (*.${c.domain}), which only a DNS-01 challenge can obtain.`
-          : 'Publicly trusted certificate for the box domain.'
-      case 'mesh-ca':
-        return 'Signed by the mesh CA: only the gateway and the Cloudflare worker trust it, so public TLS ends there.'
-      case 'other':
-        return `Issued by ${c.issuer ?? 'an unknown CA'}; neither the mesh CA nor Let’s Encrypt.`
-      default:
-        return c.error ?? 'Caddy did not answer the handshake.'
+  // A click on a grey lane of the route map. Forcing the tunnel on a box whose
+  // names answer it directly needs both switches: the tunnel only applies to
+  // traffic that reaches the gateway.
+  async function applyAction(a: Action, also: boolean) {
+    switch (a.kind) {
+      case 'tunnel':
+        if (also && !(await setDnsForce('gateway'))) return
+        await setForce('tunnel')
+        break
+      case 'auto':
+        await setForce('auto')
+        if (also) await setDnsForce('auto')
+        break
+      case 'dns-gateway':
+        await setDnsForce('gateway')
+        break
+      case 'dns-auto':
+        await setDnsForce('auto')
+        break
     }
   }
 
@@ -293,137 +279,80 @@
       {:else if !routing}
         <p class="subtle">Loading…</p>
       {:else}
-        <ol class="chain">
-          <li>
-            <h4>1 · DNS</h4>
-            <Pill tone="neutral">not reported</Pill>
-            <p class="subtle small">
-              Whether the nameserver answers with the gateway or with this box is not reported by this backend yet; public names
-              point at the gateway.
-            </p>
-          </li>
-          <li>
-            <h4>2 · Gateway</h4>
-            {#if routing.state}
-              <Pill tone={modeTone(routing.state.gateway.mode)}>{modeLabel[routing.state.gateway.mode]}</Pill>
-              <p class="subtle small">
-                OpenResty gateway: {modeLabel[routing.state.gateway.mode]} · Cloudflare worker:
-                {routing.state.worker.mode === 'offline' ? 'hands off to the gateway' : modeLabel[routing.state.worker.mode]}.
-              </p>
-            {:else}
-              <Pill tone="warn">unknown</Pill>
-              <p class="subtle small">Backend unreachable: {routing.backendError}</p>
-            {/if}
-          </li>
-          <li>
-            <h4>3 · Path</h4>
-            {#if routing.state}
-              <Pill tone={modeTone(routing.state.mode)}>{modeLabel[routing.state.mode]}</Pill>
-              {#if routing.force?.mode === 'tunnel'}<Pill tone="warn">forced</Pill>{/if}
-              <p class="subtle small">{pathReason(routing)}</p>
-            {:else}
-              <Pill tone="warn">unknown</Pill>
-            {/if}
-            {#if routing.tunnel?.handshakes?.length}
-              <p class="subtle small">
-                Tunnel: {tunnelHealthy ? 'link up' : 'link stale'}, handshake {ago(routing.tunnel.handshakes[0].last)}.
-              </p>
-            {/if}
-          </li>
-          <li>
-            <h4>4 · Box TLS</h4>
-            {#if routing.boxCert}
-              <Pill tone={boxCertTone(routing.boxCert)}>
-                {certKind[routing.boxCert.kind]}{routing.boxCert.method === 'dns-01' ? ' · DNS-01 wildcard' : ''}
-              </Pill>
-              <p class="subtle small">{boxCertExplain(routing.boxCert)}</p>
-              {#if routing.boxCert.notAfter}
-                <p class="subtle small">Expires {ago(routing.boxCert.notAfter)} ({dateTime(routing.boxCert.notAfter)}).</p>
-              {/if}
-            {:else}
-              <Pill tone="neutral">—</Pill>
-            {/if}
-          </li>
-        </ol>
+        <RouteMap {routing} {overview} busy={forcing !== null || dnsSetting !== null} onaction={applyAction} />
 
-        <h3>Routing mode</h3>
-        {#if routing.force}
-          {#if !routing.force.editable}
-            <p class="muted small">
-              {routing.force.mode === 'tunnel' ? 'Tunnel forced. ' : 'Automatic. '}Cannot be changed here: {routing.force.blocked}.
-            </p>
-          {:else if routing.force.mode === 'auto'}
-            <p class="small">
-              <strong>Automatic</strong> — the direct connection wins whenever the box has one, the tunnel otherwise.
-            </p>
-            <div class="actions">
-              <button onclick={() => setForce('tunnel')} disabled={forcing !== null || !routing.state?.hasTunnel}>
-                {forcing === 'tunnel' ? 'Switching…' : 'Force tunnel'}
-              </button>
-              <span class="subtle small">
-                {routing.state?.hasTunnel
-                  ? 'On trial: it switches back to automatic after 5 minutes unless you keep it.'
-                  : 'No tunnel route is registered, so there is nothing to force.'}
-              </span>
-            </div>
-          {:else}
-            <p class="small">
-              <strong>Tunnel forced</strong> — traffic goes through the WireGuard tunnel even when a direct connection is available.
-            </p>
-            <div class="actions">
-              {#if onTrial && revertAt !== null}
-                <button class="primary" onclick={() => setForce('confirm')} disabled={forcing !== null || !canKeep}>
-                  {forcing === 'confirm' ? 'Keeping…' : 'Keep tunnel'}
-                </button>
+        <h3>Switches</h3>
+        <dl class="kv">
+          <dt>Routing</dt>
+          <dd>
+            {#if !routing.force}
+              —
+            {:else if routing.force.mode === 'auto'}
+              <Pill tone="neutral">automatic</Pill>
+              <span class="subtle small">the direct connection wins whenever the box has one, the tunnel otherwise</span>
+            {:else}
+              <Pill tone="warn">tunnel forced</Pill>
+              {#if routing.force.editable}
+                <div class="actions">
+                  {#if onTrial && revertAt !== null}
+                    <button class="primary" onclick={() => setForce('confirm')} disabled={forcing !== null || !canKeep}>
+                      {forcing === 'confirm' ? 'Keeping…' : 'Keep tunnel'}
+                    </button>
+                  {/if}
+                  <button onclick={() => setForce('auto')} disabled={forcing !== null}>
+                    {forcing === 'auto' ? 'Switching…' : 'Back to automatic'}
+                  </button>
+                  {#if onTrial && revertAt !== null}
+                    <span class="subtle small">
+                      Switches back on its own in {countdown(revertAt - now)}{canKeep ? '' : ' — waiting for the tunnel to take over'}.
+                    </span>
+                  {/if}
+                </div>
               {/if}
-              <button onclick={() => setForce('auto')} disabled={forcing !== null}>
-                {forcing === 'auto' ? 'Switching…' : 'Back to automatic'}
-              </button>
-              {#if onTrial && revertAt !== null}
+            {/if}
+            {#if routing.force && !routing.force.editable}
+              <p class="muted small">Cannot be changed here: {routing.force.blocked}.</p>
+            {/if}
+          </dd>
+          {#if routing.dns?.delegated}
+            <dt>Nameserver</dt>
+            <dd>
+              {#if routing.dns.force === 'gateway'}
+                <Pill tone="warn">answers the gateway</Pill>
+                <span class="subtle small">your choice</span>
+                {#if routing.dns.editable}
+                  <div class="actions">
+                    <button onclick={() => setDnsForce('auto')} disabled={dnsSetting !== null}>
+                      {dnsSetting === 'auto' ? 'Switching…' : 'Back to automatic'}
+                    </button>
+                  </div>
+                {/if}
+              {:else}
+                <Pill tone={routing.dns.answer === 'direct' ? 'ok' : 'neutral'}>
+                  {routing.dns.answer === 'direct' ? 'answers this box' : 'answers the gateway'}
+                </Pill>
                 <span class="subtle small">
-                  Switches back on its own in {countdown(revertAt - now)}{canKeep ? '' : ' — waiting for the tunnel to take over'}.
+                  {routing.dns.force === 'direct' ? 'set by an administrator' : 'automatic'} — {routing.dns.reason}
                 </span>
               {/if}
-            </div>
+              {#if !routing.dns.live}<Pill tone="warn">delegation not live yet</Pill>{/if}
+              {#if !routing.dns.editable}
+                <p class="muted small">Cannot be changed here: {routing.dns.blocked}.</p>
+              {/if}
+            </dd>
           {/if}
-        {/if}
+          {#if routing.tunnel?.handshakes?.length}
+            <dt>Tunnel link</dt>
+            <dd class="small">{tunnelHealthy ? 'up' : 'stale'}, handshake {ago(routing.tunnel.handshakes[0].last)}</dd>
+          {/if}
+        </dl>
         {#if forceResult}
           <p><Pill tone={forceResult.ok ? 'ok' : 'bad'}>{forceResult.ok ? 'done' : 'problem'}</Pill> <span class="small">{forceResult.message}</span></p>
           {#if forceResult.output}<pre class="out">{forceResult.output}</pre>{/if}
         {/if}
-
-        {#if routing.dns?.delegated}
-          <h3>Nameserver</h3>
-          <p class="small">
-            <Pill tone={routing.dns.answer === 'direct' ? 'ok' : 'neutral'}>
-              {routing.dns.answer === 'direct' ? 'answers the box' : 'answers the gateway'}
-            </Pill>
-            {#if !routing.dns.live}<Pill tone="warn">delegation not live yet</Pill>{/if}
-            <span class="subtle">{routing.dns.reason}</span>
-          </p>
-          {#if !routing.dns.editable}
-            <p class="muted small">Cannot be changed here: {routing.dns.blocked}.</p>
-          {:else if routing.dns.force === 'gateway'}
-            <p class="small"><strong>Through the gateway</strong> — your names answer the gateway even when the box could be reached directly.</p>
-            <div class="actions">
-              <button onclick={() => setDnsForce('auto')} disabled={dnsSetting !== null}>
-                {dnsSetting === 'auto' ? 'Switching…' : 'Back to automatic'}
-              </button>
-            </div>
-          {:else if routing.dns.force === 'direct'}
-            <p class="small"><strong>Direct (set by an administrator)</strong> — your names answer the box.</p>
-          {:else}
-            <p class="small"><strong>Automatic</strong> — your names answer the box once it serves them with a trusted certificate, the gateway otherwise.</p>
-            <div class="actions">
-              <button onclick={() => setDnsForce('gateway')} disabled={dnsSetting !== null}>
-                {dnsSetting === 'gateway' ? 'Switching…' : 'Route through the gateway'}
-              </button>
-            </div>
-          {/if}
-          {#if dnsResult}
-            <p><Pill tone={dnsResult.ok ? 'ok' : 'bad'}>{dnsResult.ok ? 'done' : 'problem'}</Pill> <span class="small">{dnsResult.message}</span></p>
-            {#if dnsResult.output}<pre class="out">{dnsResult.output}</pre>{/if}
-          {/if}
+        {#if dnsResult}
+          <p><Pill tone={dnsResult.ok ? 'ok' : 'bad'}>{dnsResult.ok ? 'done' : 'problem'}</Pill> <span class="small">{dnsResult.message}</span></p>
+          {#if dnsResult.output}<pre class="out">{dnsResult.output}</pre>{/if}
         {/if}
       {/if}
     </Card>
@@ -432,7 +361,7 @@
   <div class="wide">
     <Card title="Routing">
       {#snippet actions()}
-        <button onclick={loadRouting} disabled={loadingRouting}>{loadingRouting ? 'Checking…' : 'Refresh'}</button>
+        <button onclick={() => loadRouting(true)} disabled={loadingRouting}>{loadingRouting ? 'Checking…' : 'Refresh'}</button>
       {/snippet}
       {#if errors.routing}
         <p class="error">{errors.routing}</p>
@@ -590,48 +519,6 @@
   }
   tr.active td {
     background: var(--ok-bg);
-  }
-  .chain {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.75rem;
-  }
-  .chain li {
-    position: relative;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 0.7rem;
-    background: var(--surface-sunken);
-    min-width: 0;
-  }
-  .chain li + li::before {
-    content: '→';
-    position: absolute;
-    left: -0.7rem;
-    top: 0.7rem;
-    color: var(--text-subtle);
-    font-size: 0.8rem;
-  }
-  .chain h4 {
-    margin: 0 0 0.45rem;
-    font-size: 0.8rem;
-  }
-  .chain p {
-    margin: 0.45rem 0 0;
-    overflow-wrap: anywhere;
-  }
-  @media (max-width: 760px) {
-    .chain {
-      grid-template-columns: minmax(0, 1fr);
-    }
-    .chain li + li::before {
-      content: '↓';
-      left: 0.7rem;
-      top: -0.75rem;
-    }
   }
   .actions {
     display: flex;

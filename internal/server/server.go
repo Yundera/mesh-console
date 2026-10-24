@@ -41,6 +41,10 @@ type Server struct {
 	boxMu    sync.Mutex
 	boxCache *boxCertCache
 
+	// traceCache holds the last traced requests to the box's public names (traces).
+	traceMu    sync.Mutex
+	traceCache *traceCache
+
 	// mailer sends the Email page's test message; lastTestMail rate-limits it.
 	mailer       mail.Sender
 	mailMu       sync.Mutex
