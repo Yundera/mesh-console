@@ -129,3 +129,25 @@ func TestSetUpdateChannel(t *testing.T) {
 		t.Error("bad scripts dir accepted")
 	}
 }
+
+func TestSetRoutingMode(t *testing.T) {
+	const scripts = "/DATA/AppData/mesh/scripts"
+	v, err := SetRoutingMode(scripts, "tunnel")
+	if err != nil || strings.Join(v.Argv, "|") != "bash|/DATA/AppData/mesh/scripts/tools/set-routing-mode.sh|tunnel|--revert-after|300" || v.Detached {
+		t.Fatalf("tunnel: %+v %v", v, err)
+	}
+	for _, m := range []string{"auto", "confirm"} {
+		v, err := SetRoutingMode(scripts, m)
+		if err != nil || strings.Join(v.Argv, "|") != "bash|/DATA/AppData/mesh/scripts/tools/set-routing-mode.sh|"+m {
+			t.Fatalf("%s: %+v %v", m, v, err)
+		}
+	}
+	for _, bad := range []string{"", "direct", "Tunnel", "tunnel --revert-after 1", "auto;id", "--wait"} {
+		if _, err := SetRoutingMode(scripts, bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	if _, err := SetRoutingMode("/DATA/$(id)", "auto"); err == nil {
+		t.Error("bad scripts dir accepted")
+	}
+}

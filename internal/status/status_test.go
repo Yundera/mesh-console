@@ -70,6 +70,16 @@ func TestCompute(t *testing.T) {
 			in.CertNotBefore, in.CertNotAfter = nil, &d
 		}, Warn, Reachability, Warn, "Online", 1},
 		{"cert expired", func(in *Inputs) { d := now.Add(-time.Hour); in.CertNotAfter = &d }, Bad, Reachability, Bad, "Certificate expired", 1},
+		{"forced tunnel is info", func(in *Inputs) {
+			in.Routing = &routing.State{Mode: routing.ModeTunnel}
+			in.RoutingForce = "tunnel"
+		}, OK, Reachability, OK, "Online", 1},
+		{"forced tunnel on trial needs attention", func(in *Inputs) {
+			in.Routing = &routing.State{Mode: routing.ModeTunnel}
+			in.RoutingForce = "tunnel"
+			at := now.Add(4 * time.Minute)
+			in.RoutingRevertAt = &at
+		}, Warn, Reachability, Warn, "Online", 1},
 		{"old relay has no mail data", func(in *Inputs) { in.Mail = nil }, OK, Email, Unknown, "No data", 0},
 		{"nothing sent yet", func(in *Inputs) { in.Mail = &Mail{} }, OK, Email, Unknown, "Nothing sent yet", 0},
 		{"last mail failed", func(in *Inputs) { in.Mail = &Mail{LastStatus: "failed"} }, Warn, Email, Warn, "Last email failed", 1},

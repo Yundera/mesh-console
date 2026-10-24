@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/yundera/mesh-console/internal/config"
 )
@@ -309,5 +310,67 @@ func TestUpdateManaged(t *testing.T) {
 	rec = do(h, http.MethodPost, "/api/update/channel", map[string]string{"X-Mesh-Console": "1"})
 	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "managed by Yundera") {
 		t.Fatalf("POST channel on managed box = %d %s, want 403", rec.Code, rec.Body)
+	}
+}
+
+// The force-tunnel switch needs the template's own action, refuses while a
+// migration holds routing, and reports a pending revert only while the state
+// file agrees with the .env.
+func TestRoutingForce(t *testing.T) {
+	cfg := config.Config{DevIdentity: "dev", Env: "development", MeshDir: meshFixture(t), MeshHostRoot: "/DATA/AppData/mesh"}
+	h := testServer(t, cfg)
+	rec := do(h, http.MethodPost, "/api/routing/force", map[string]string{"X-Mesh-Console": "1"})
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "set-routing-mode.sh") {
+		t.Fatalf("missing tool = %d %s", rec.Code, rec.Body)
+	}
+
+	tool := filepath.Join(cfg.MeshDir, "scripts", "tools", "set-routing-mode.sh")
+	if err := os.MkdirAll(filepath.Dir(tool), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tool, []byte("#!/bin/bash\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec = do(h, http.MethodPost, "/api/routing/force", map[string]string{"X-Mesh-Console": "1"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty mode = %d %s, want 400", rec.Code, rec.Body)
+	}
+
+	env := "DOMAIN=alice.nsl.sh\nMESH_ROUTING_FORCE=tunnel\n"
+	if err := os.WriteFile(filepath.Join(cfg.MeshDir, ".env"), []byte(env), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(cfg.MeshDir, "data", "routing", "force.json")
+	if err := os.MkdirAll(filepath.Dir(state), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := newServer(cfg)
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		file    string
+		pending bool
+	}{
+		{`{"mode":"tunnel","revertAt":"2026-10-23T12:04:00Z","changedAt":"2026-10-23T11:59:00Z"}`, true},
+		{`{"mode":"tunnel","revertAt":"2026-10-23T11:58:00Z","changedAt":"2026-10-23T11:53:00Z"}`, false}, // past
+		{`{"mode":"auto","revertAt":"2026-10-23T12:04:00Z","changedAt":"2026-10-23T11:59:00Z"}`, false},   // stale file
+		{`{"mode":"tunnel","revertAt":null,"changedAt":"2026-10-23T11:59:00Z"}`, false},                   // confirmed
+	} {
+		if err := os.WriteFile(state, []byte(tc.file), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		e, _ := s.env()
+		f := s.routingForce(e, now)
+		if f.Mode != "tunnel" || !f.Editable || (f.RevertAt != nil) != tc.pending {
+			t.Errorf("%s: %+v", tc.file, f)
+		}
+	}
+
+	env += "MESH_ROUTING_HOLD=migrating:20261023\n"
+	if err := os.WriteFile(filepath.Join(cfg.MeshDir, ".env"), []byte(env), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec = do(h, http.MethodPost, "/api/routing/force", map[string]string{"X-Mesh-Console": "1"})
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "migration") {
+		t.Fatalf("held = %d %s", rec.Code, rec.Body)
 	}
 }

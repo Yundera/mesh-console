@@ -1,7 +1,7 @@
 <script lang="ts">
   import Card from '../lib/Card.svelte'
   import Pill from '../lib/Pill.svelte'
-  import { api, type Overview, type Routing, type StackContainer, type Mode } from '../lib/api'
+  import { api, ApiError, type Overview, type Routing, type StackContainer, type Mode, type BoxCert } from '../lib/api'
   import { ago, dateTime } from '../lib/format'
 
   let overview = $state<Overview | null>(null)
@@ -48,6 +48,111 @@
     }, 30_000)
     return () => clearInterval(t)
   })
+
+  // ---- routing force ------------------------------------------------------
+  // A forced tunnel is on trial until kept: the host switches back to auto at
+  // revertAt on its own, since this page is reached over the path being changed.
+
+  let forcing = $state<'auto' | 'tunnel' | 'confirm' | null>(null)
+  let forceResult = $state<{ ok: boolean; message: string; output?: string } | null>(null)
+  let now = $state(Date.now())
+
+  const revertAt = $derived(routing?.force?.revertAt ? new Date(routing.force.revertAt).getTime() : null)
+  const onTrial = $derived(revertAt !== null && revertAt > now)
+
+  // While on trial: follow the switch closely and count down.
+  $effect(() => {
+    if (!onTrial) return
+    const poll = setInterval(loadRouting, 3_000)
+    const tick = setInterval(() => (now = Date.now()), 1_000)
+    return () => {
+      clearInterval(poll)
+      clearInterval(tick)
+    }
+  })
+
+  function countdown(ms: number) {
+    const s = Math.max(0, Math.round(ms / 1000))
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  }
+
+  // Keeping the tunnel is offered once the switch is visible: the backend picks
+  // the tunnel and its WireGuard link is fresh.
+  const tunnelHealthy = $derived(
+    !!routing?.tunnel?.handshakes?.some((h) => handshakeTone(h.last, h.never) === 'ok'),
+  )
+  const canKeep = $derived(routing?.state?.mode === 'tunnel' && tunnelHealthy)
+
+  async function setForce(mode: 'auto' | 'tunnel' | 'confirm') {
+    forceResult = null
+    forcing = mode
+    try {
+      await api.post('/api/routing/force', { mode })
+      forceResult = {
+        ok: true,
+        message:
+          mode === 'tunnel'
+            ? 'Tunnel forced. Check that this page still works, then keep it — otherwise it switches back on its own.'
+            : mode === 'confirm'
+              ? 'Kept: traffic stays on the tunnel until you switch back.'
+              : 'Back to automatic: the direct connection wins again when the box has one.',
+      }
+    } catch (e) {
+      const body = e instanceof ApiError ? (e.body as { result?: { output?: string } } | undefined) : undefined
+      forceResult = { ok: false, message: (e as Error).message, output: body?.result?.output }
+    } finally {
+      forcing = null
+      now = Date.now()
+      await loadRouting()
+    }
+  }
+
+  function pathReason(r: Routing): string {
+    const s = r.state
+    if (!s) return ''
+    const forced = r.force?.mode === 'tunnel'
+    if (s.mode === 'direct') {
+      if (forced) return 'Tunnel forced, but the direct route still ranks first — the agent re-registers within a minute.'
+      const rt = s.gateway.route
+      return `The backend accepted the agent’s direct route${rt ? ` to ${rt.domain || rt.ip}:${rt.port}` : ''} when it registered.`
+    }
+    if (s.mode === 'tunnel' && forced)
+      return s.worker.mode === 'direct'
+        ? 'Forced: the direct route is still registered, ranked below the tunnel. The Cloudflare worker still goes direct — it only follows the tunnel from the release that honours route priority.'
+        : 'Forced: the direct route is still registered, ranked below the tunnel.'
+    return modeExplain(r)
+  }
+
+  const certKind: Record<BoxCert['kind'], string> = {
+    letsencrypt: 'Let’s Encrypt',
+    'mesh-ca': 'Mesh CA',
+    other: 'Other issuer',
+    unreachable: 'No answer',
+  }
+  function boxCertTone(c: BoxCert) {
+    if (c.kind === 'unreachable' || c.renewal === 'expired') return 'bad'
+    if (c.renewal === 'overdue') return 'warn'
+    return c.kind === 'letsencrypt' ? 'ok' : c.kind === 'mesh-ca' ? 'info' : 'warn'
+  }
+  function boxCertExplain(c: BoxCert): string {
+    switch (c.kind) {
+      case 'letsencrypt':
+        return c.method === 'dns-01'
+          ? `Publicly trusted wildcard (*.${c.domain}), which only a DNS-01 challenge can obtain.`
+          : 'Publicly trusted certificate for the box domain.'
+      case 'mesh-ca':
+        return 'Signed by the mesh CA: only the gateway and the Cloudflare worker trust it, so public TLS ends there.'
+      case 'other':
+        return `Issued by ${c.issuer ?? 'an unknown CA'}; neither the mesh CA nor Let’s Encrypt.`
+      default:
+        return c.error ?? 'Caddy did not answer the handshake.'
+    }
+  }
+
+  const ipModeExplain: Record<string, string> = {
+    egress: 'egress — the address the box connects from (right behind NAT)',
+    interface: 'interface — an address bound on this machine (right for a cloud VM)',
+  }
 
   const modeLabel: Record<Mode, string> = {
     direct: 'Direct',
@@ -111,6 +216,18 @@
           <dt>IPv6</dt>
           <dd class="mono">{overview.publicIpv6}</dd>
         {/if}
+        <dt>Detected by</dt>
+        <dd class="small">{ipModeExplain[overview.publicIpMode] ?? overview.publicIpMode} <span class="subtle">(PUBLIC_IP_MODE)</span></dd>
+        {#if routing?.state}
+          <dt>Direct route</dt>
+          <dd>
+            {#if routing.state.hasAgent}
+              <Pill tone="ok">accepted by the backend</Pill>
+            {:else}
+              <Pill tone="neutral">none registered</Pill>
+            {/if}
+          </dd>
+        {/if}
         {#if overview.email}
           <dt>Email</dt>
           <dd>{overview.email}</dd>
@@ -144,6 +261,115 @@
   </Card>
 
   <div class="wide">
+    <Card title="How you’re reached">
+      {#if errors.routing}
+        <p class="error">{errors.routing}</p>
+      {:else if !routing}
+        <p class="subtle">Loading…</p>
+      {:else}
+        <ol class="chain">
+          <li>
+            <h4>1 · DNS</h4>
+            <Pill tone="neutral">not reported</Pill>
+            <p class="subtle small">
+              Whether the nameserver answers with the gateway or with this box is not reported by this backend yet; public names
+              point at the gateway.
+            </p>
+          </li>
+          <li>
+            <h4>2 · Gateway</h4>
+            {#if routing.state}
+              <Pill tone={modeTone(routing.state.gateway.mode)}>{modeLabel[routing.state.gateway.mode]}</Pill>
+              <p class="subtle small">
+                OpenResty gateway: {modeLabel[routing.state.gateway.mode]} · Cloudflare worker:
+                {routing.state.worker.mode === 'offline' ? 'hands off to the gateway' : modeLabel[routing.state.worker.mode]}.
+              </p>
+            {:else}
+              <Pill tone="warn">unknown</Pill>
+              <p class="subtle small">Backend unreachable: {routing.backendError}</p>
+            {/if}
+          </li>
+          <li>
+            <h4>3 · Path</h4>
+            {#if routing.state}
+              <Pill tone={modeTone(routing.state.mode)}>{modeLabel[routing.state.mode]}</Pill>
+              {#if routing.force?.mode === 'tunnel'}<Pill tone="warn">forced</Pill>{/if}
+              <p class="subtle small">{pathReason(routing)}</p>
+            {:else}
+              <Pill tone="warn">unknown</Pill>
+            {/if}
+            {#if routing.tunnel?.handshakes?.length}
+              <p class="subtle small">
+                Tunnel: {tunnelHealthy ? 'link up' : 'link stale'}, handshake {ago(routing.tunnel.handshakes[0].last)}.
+              </p>
+            {/if}
+          </li>
+          <li>
+            <h4>4 · Box TLS</h4>
+            {#if routing.boxCert}
+              <Pill tone={boxCertTone(routing.boxCert)}>
+                {certKind[routing.boxCert.kind]}{routing.boxCert.method === 'dns-01' ? ' · DNS-01 wildcard' : ''}
+              </Pill>
+              <p class="subtle small">{boxCertExplain(routing.boxCert)}</p>
+              {#if routing.boxCert.notAfter}
+                <p class="subtle small">Expires {ago(routing.boxCert.notAfter)} ({dateTime(routing.boxCert.notAfter)}).</p>
+              {/if}
+            {:else}
+              <Pill tone="neutral">—</Pill>
+            {/if}
+          </li>
+        </ol>
+
+        <h3>Routing mode</h3>
+        {#if routing.force}
+          {#if !routing.force.editable}
+            <p class="muted small">
+              {routing.force.mode === 'tunnel' ? 'Tunnel forced. ' : 'Automatic. '}Cannot be changed here: {routing.force.blocked}.
+            </p>
+          {:else if routing.force.mode === 'auto'}
+            <p class="small">
+              <strong>Automatic</strong> — the direct connection wins whenever the box has one, the tunnel otherwise.
+            </p>
+            <div class="actions">
+              <button onclick={() => setForce('tunnel')} disabled={forcing !== null || !routing.state?.hasTunnel}>
+                {forcing === 'tunnel' ? 'Switching…' : 'Force tunnel'}
+              </button>
+              <span class="subtle small">
+                {routing.state?.hasTunnel
+                  ? 'On trial: it switches back to automatic after 5 minutes unless you keep it.'
+                  : 'No tunnel route is registered, so there is nothing to force.'}
+              </span>
+            </div>
+          {:else}
+            <p class="small">
+              <strong>Tunnel forced</strong> — traffic goes through the WireGuard tunnel even when a direct connection is available.
+            </p>
+            <div class="actions">
+              {#if onTrial && revertAt !== null}
+                <button class="primary" onclick={() => setForce('confirm')} disabled={forcing !== null || !canKeep}>
+                  {forcing === 'confirm' ? 'Keeping…' : 'Keep tunnel'}
+                </button>
+              {/if}
+              <button onclick={() => setForce('auto')} disabled={forcing !== null}>
+                {forcing === 'auto' ? 'Switching…' : 'Back to automatic'}
+              </button>
+              {#if onTrial && revertAt !== null}
+                <span class="subtle small">
+                  Switches back on its own in {countdown(revertAt - now)}{canKeep ? '' : ' — waiting for the tunnel to take over'}.
+                </span>
+              {/if}
+            </div>
+          {/if}
+        {/if}
+        {#if forceResult}
+          <p><Pill tone={forceResult.ok ? 'ok' : 'bad'}>{forceResult.ok ? 'done' : 'problem'}</Pill> <span class="small">{forceResult.message}</span></p>
+          {#if forceResult.output}<pre class="out">{forceResult.output}</pre>{/if}
+        {/if}
+      {/if}
+    </Card>
+  </div>
+
+  <div class="wide">
     <Card title="Routing">
       {#snippet actions()}
         <button onclick={loadRouting} disabled={loadingRouting}>{loadingRouting ? 'Checking…' : 'Refresh'}</button>
@@ -161,7 +387,7 @@
           {#if routing.state.worker.mode !== routing.state.gateway.mode}
             <p class="muted small">
               Cloudflare worker path: <strong>{modeLabel[routing.state.worker.mode]}</strong> — it only uses domain routes,
-              {routing.state.worker.mode === 'offline' ? 'and none is registered, so it falls back to the gateway.' : 'so it picks differently.'}
+              {routing.state.worker.mode === 'offline' ? 'and has none it may use here (none registered, or the tunnel ranks first), so it hands requests to the gateway.' : 'so it picks differently.'}
             </p>
           {/if}
           <p class="subtle small">
@@ -304,5 +530,64 @@
   }
   tr.active td {
     background: var(--ok-bg);
+  }
+  .chain {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+  .chain li {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.7rem;
+    background: var(--surface-sunken);
+    min-width: 0;
+  }
+  .chain li + li::before {
+    content: '→';
+    position: absolute;
+    left: -0.7rem;
+    top: 0.7rem;
+    color: var(--text-subtle);
+    font-size: 0.8rem;
+  }
+  .chain h4 {
+    margin: 0 0 0.45rem;
+    font-size: 0.8rem;
+  }
+  .chain p {
+    margin: 0.45rem 0 0;
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 760px) {
+    .chain {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .chain li + li::before {
+      content: '↓';
+      left: 0.7rem;
+      top: -0.75rem;
+    }
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: center;
+  }
+  .out {
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    white-space: pre-wrap;
+    max-height: 16rem;
+    overflow: auto;
   }
 </style>

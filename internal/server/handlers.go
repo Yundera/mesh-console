@@ -65,6 +65,7 @@ func (s *Server) overviewData(ctx context.Context, env meshenv.Env) map[string]a
 		"publicIp":     env.Get("PUBLIC_IP"),
 		"publicIpv4":   env.Get("PUBLIC_IPV4"),
 		"publicIpv6":   env.Get("PUBLIC_IPV6"),
+		"publicIpMode": orDefault(env.Get("PUBLIC_IP_MODE"), "egress"),
 		"ipDash":       ipDash,
 		"email":        env.Get("EMAIL"),
 		"links":        l,
@@ -94,6 +95,7 @@ type routingResult struct {
 	out   map[string]any
 	state *routing.State // nil when the backend could not be asked
 	cert  *probe.Cert
+	force *routingForce
 }
 
 // gatherRouting asks the backend how the gateways reach this box. With local
@@ -127,6 +129,9 @@ func (s *Server) gatherRouting(ctx context.Context, env meshenv.Env, local bool)
 		rr.cert = c
 		out["cert"] = c
 	}
+	force := s.routingForce(env, time.Now())
+	rr.force = &force
+	out["force"] = force
 	rr.out = out
 	if !local {
 		return rr
@@ -145,6 +150,11 @@ func (s *Server) gatherRouting(ctx context.Context, env meshenv.Env, local bool)
 	}
 	if d := env.Get("DOMAIN"); d != "" {
 		out["rootDomain"] = probe.Root(ctx, s.cfg.CaddyHost, d)
+		meshIssuer := ""
+		if rr.cert != nil {
+			meshIssuer = rr.cert.Issuer
+		}
+		out["boxCert"] = s.boxCert(ctx, d, meshIssuer)
 	}
 	return rr
 }

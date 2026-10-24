@@ -96,6 +96,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		LastRun:       sc.lastFinished(),
 		UpdateRunning: sc.running || sc.runnerBusy,
 	}
+	if rr.force != nil {
+		in.RoutingForce, in.RoutingRevertAt = rr.force.Mode, rr.force.RevertAt
+	}
 	for _, c := range stack {
 		in.Containers = append(in.Containers, status.Container{Name: c.Name, State: c.State, Health: c.Health, Drift: c.Drift})
 	}

@@ -8,6 +8,7 @@ package status
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -103,6 +104,11 @@ type Inputs struct {
 
 	// Mail is nil when the relay does not report activity (older relay, or unreachable).
 	Mail *Mail
+
+	// RoutingForce is MESH_ROUTING_FORCE as applied ("auto" or "tunnel");
+	// RoutingRevertAt is set while a forced tunnel is waiting to be confirmed.
+	RoutingForce    string
+	RoutingRevertAt *time.Time
 }
 
 const (
@@ -162,6 +168,17 @@ func reachability(in Inputs, add addFn) Tile {
 		t = Tile{Level: OK, Label: "Online", Detail: "Through a secure tunnel"}
 	default:
 		t = Tile{Level: OK, Label: "Online"}
+	}
+	if in.RoutingForce == "tunnel" {
+		if in.Routing != nil && in.Routing.Mode == routing.ModeTunnel {
+			t.Detail = "Through a secure tunnel (forced)"
+		}
+		if in.RoutingRevertAt != nil {
+			add(Warn, Reachability, link, "Traffic is forced through the tunnel on trial: it switches back to automatic in "+plural(max(1, int(math.Ceil(in.RoutingRevertAt.Sub(in.Now).Minutes()))), "minute")+" unless you keep it on the Diagnostics page.")
+			t = worse(t, Warn, "")
+		} else {
+			add(Info, Reachability, link, "Traffic is forced through the tunnel, even when a direct connection is available. Switch back to automatic on the Diagnostics page.")
+		}
 	}
 	if in.CertNotAfter != nil {
 		left := in.CertNotAfter.Sub(in.Now)

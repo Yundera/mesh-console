@@ -55,6 +55,7 @@ export interface Overview {
   publicIp: string
   publicIpv4: string
   publicIpv6: string
+  publicIpMode: 'egress' | 'interface' | string
   ipDash: string
   email: string
   links: { root: string; maison: string; dashboard?: string; sslip?: string; nip?: string }
@@ -89,6 +90,30 @@ export interface Routing {
   cert?: { subject: string; dnsNames: string[]; notBefore?: string; notAfter: string; issuer: string }
   certError?: string
   rootDomain?: { status: number; error?: string; catchall: boolean }
+  force?: RoutingForce
+  boxCert?: BoxCert
+}
+
+// MESH_ROUTING_FORCE as the template applies it (internal/server/reach.go).
+export interface RoutingForce {
+  mode: 'auto' | 'tunnel'
+  revertAt?: string
+  editable: boolean
+  blocked?: string
+  hold?: string
+}
+
+// The certificate Caddy serves on the box domain (internal/certs/box.go).
+export interface BoxCert {
+  domain: string
+  kind: 'letsencrypt' | 'mesh-ca' | 'other' | 'unreachable'
+  issuer?: string
+  dnsNames?: string[]
+  wildcard: boolean
+  method?: string
+  notAfter?: string
+  renewal?: 'ok' | 'overdue' | 'expired'
+  error?: string
 }
 
 export interface StackContainer {

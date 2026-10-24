@@ -8,7 +8,9 @@
 //     routes matching the request scheme (all of them if none match), sort by
 //     priority ascending with a missing priority as 999, take the first.
 //   - Cloudflare worker (mesh-router-gateway-cf src/index.ts): same, but only
-//     `type: domain` routes — it cannot fetch raw IPs.
+//     `type: domain` routes — it cannot fetch raw IPs. When a tunnel route
+//     strictly outranks every domain route, as with a forced tunnel, it hands
+//     the request to the gateway instead, like having none.
 //
 // So "current" is an inference from the registry, not an observation of live
 // traffic, and the UI says so.
@@ -93,7 +95,31 @@ func pick(routes []backend.Route, scheme string, domainOnly bool) Pick {
 	}
 	sort.SliceStable(matching, func(i, j int) bool { return prio(matching[i]) < prio(matching[j]) })
 	best := matching[0]
+	if domainOnly && best.Priority != 0 {
+		// Raw priorities, as the worker compares them: a missing one is undefined
+		// there and outranks nothing.
+		for _, r := range schemeOrAll(routes, scheme) {
+			if r.Source == "tunnel" && (r.Type != "domain" || r.Domain == "") && r.Priority != 0 && r.Priority < best.Priority {
+				return Pick{Mode: ModeOffline} // the worker defers to the gateway
+			}
+		}
+	}
 	return Pick{Mode: modeOf(best), Route: &best}
+}
+
+// schemeOrAll is the worker's own candidate set before its domain filter: the
+// routes of the request scheme, or all of them when none matches.
+func schemeOrAll(routes []backend.Route, scheme string) []backend.Route {
+	var out []backend.Route
+	for _, r := range routes {
+		if schemeOf(r) == scheme {
+			out = append(out, r)
+		}
+	}
+	if len(out) == 0 {
+		return routes
+	}
+	return out
 }
 
 func schemeOf(r backend.Route) string {

@@ -31,6 +31,16 @@ func TestInfer(t *testing.T) {
 			500, ModeDirect, ModeDirect, ModeOffline,
 		},
 		{
+			"agent demoted below the tunnel (forced tunnel): tunnel wins, the worker defers to the gateway",
+			[]backend.Route{tunnel("https"), func() backend.Route { r := agentDomain("https"); r.Priority = 3; return r }()},
+			500, ModeTunnel, ModeTunnel, ModeOffline,
+		},
+		{
+			"a tie keeps the worker on the domain route",
+			[]backend.Route{tunnel("https"), func() backend.Route { r := agentDomain("https"); r.Priority = 2; return r }()},
+			500, ModeTunnel, ModeTunnel, ModeDirect,
+		},
+		{
 			"missing priority sorts last",
 			[]backend.Route{{Source: "agent", Scheme: "https", Type: "domain", Domain: "x.nip.io"}, tunnel("https")},
 			500, ModeTunnel, ModeTunnel, ModeDirect,

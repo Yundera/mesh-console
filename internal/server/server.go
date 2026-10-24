@@ -37,6 +37,10 @@ type Server struct {
 	idMu    sync.Mutex
 	idCache *identityCache
 
+	// boxCache holds the certificate Caddy serves on the box domain (boxCert).
+	boxMu    sync.Mutex
+	boxCache *boxCertCache
+
 	// mailer sends the Email page's test message; lastTestMail rate-limits it.
 	mailer       mail.Sender
 	mailMu       sync.Mutex
@@ -88,6 +92,7 @@ func (s *Server) routes(uiFS fs.FS) http.Handler {
 		api.Get("/status", s.handleStatus)
 		api.Get("/overview", s.handleOverview)
 		api.Get("/routing", s.handleRouting)
+		api.Post("/routing/force", s.handleSetRoutingForce)
 		api.Get("/stack", s.handleStack)
 		api.Get("/update", s.handleUpdate)
 		api.Post("/update/run", s.handleUpdateRun)

@@ -123,6 +123,42 @@ func SetUpdateChannel(scripts, channel, url string) (Verb, error) {
 	return Verb{Name: "set-update-channel", Argv: argv}, nil
 }
 
+// SetRoutingModeTool is the template's action for the path traffic takes behind
+// the gateway, relative to its scripts directory:
+// `<auto|tunnel|confirm> [--revert-after <secs>]`, exit 0 applied, 2 bad
+// arguments, ExitBusy while a self-check runs, ExitRoutingHeld while a migration
+// holds routing. How a mode is applied (the agent's route priority) is the
+// template's business; it leaves its state in data/routing/force.json.
+const SetRoutingModeTool = "tools/set-routing-mode.sh"
+
+// ExitRoutingHeld is the routing tool's exit code while MESH_ROUTING_HOLD is set.
+const ExitRoutingHeld = 76
+
+// RoutingRevertSeconds is how long a forced tunnel lasts unless confirmed. The
+// console is reached over the very path being changed, so a choice that cuts it
+// off must undo itself.
+const RoutingRevertSeconds = 300
+
+// RoutingModes are the verbs the tool accepts.
+var RoutingModes = []string{"auto", "tunnel", "confirm"}
+
+// SetRoutingMode switches the routing path. `tunnel` always schedules a revert
+// to auto (RoutingRevertSeconds) that only `confirm` cancels.
+func SetRoutingMode(scripts, mode string) (Verb, error) {
+	if err := checkRoot(scripts); err != nil {
+		return Verb{}, err
+	}
+	argv := []string{"bash", path.Join(scripts, SetRoutingModeTool), mode}
+	switch mode {
+	case "auto", "confirm":
+	case "tunnel":
+		argv = append(argv, "--revert-after", strconv.Itoa(RoutingRevertSeconds))
+	default:
+		return Verb{}, fmt.Errorf("unknown routing mode %q", mode)
+	}
+	return Verb{Name: "set-routing-mode", Argv: argv}, nil
+}
+
 var rootRe = regexp.MustCompile(`^/[a-zA-Z0-9/_.-]+$`)
 
 func checkRoot(p string) error {

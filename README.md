@@ -11,7 +11,7 @@ Served at `mesh-console-${DOMAIN}`, behind an AppShield gate, admins only.
 | **Update** | Installed template commit vs latest on the `UPDATE_URL` branch; auto-update / cron settings; last self-check runs step by step; raw log | **Update now** = run the self-check |
 | **Domain** | Domain, sslip.io / nip.io fallbacks, root-domain default app, custom-domain DNS help | Change the default app (container + port) |
 | **Certificates** | The mesh certificate (box domain + nip.io) and, for every sslip.io address Caddy serves (running containers' `caddy`/`caddy_N` labels + the root sslip.io block), the certificate it actually presents — Let's Encrypt, fallback (internal CA) or none — from a TLS handshake with Caddy over `pcs`. Expiry is judged against each cert's own lifetime. For a non-Let's-Encrypt address, the reason is read from Caddy's last 14 days of log. On demand only (`GET /api/certificates`), never polled | **Check again** |
-| **Diagnostics** | Links (incl. sslip.io); routing state **Direct / Tunnel / Offline** with the routes the backend holds; tunnel handshake age; mesh certificate expiry; root-domain probe; platform containers and image drift | — |
+| **Diagnostics** | **How you're reached**: DNS (not reported by the backend yet) → gateway (OpenResty and CF-worker picks) → path **Direct / Tunnel / Offline** with the reason → the certificate Caddy serves on the box domain (mesh CA, or Let's Encrypt; a Let's Encrypt `*.<domain>` is reported as a DNS-01 wildcard). Public IP with v4/v6, `PUBLIC_IP_MODE` and whether the backend holds a direct route. Links (incl. sslip.io); the routes the backend holds; tunnel handshake age; mesh certificate expiry; root-domain probe; platform containers and image drift | **Force tunnel** / **Keep tunnel** / **Back to automatic** |
 | **Migration** | Moving the box to another machine with the template's `tools/migrate.sh`: this box's migration key, the target check (every requirement, nothing changed), then the live run — steps grouped by who serves the apps, copy progress, the log. A retired box says where it went; a box that was migrated onto says where it came from | **Create migration key**, **Check**, **Start migration**, **Cancel** |
 
 ## How it works
@@ -45,7 +45,13 @@ browser ─► mesh-router-caddy ─► mesh-console (AppShield gate, OIDC_REQUI
     [--status-url <https>] | cancel`, the Migration page. `start` launches the pipeline as
     a systemd unit on the host and returns; the page then reads the script's
     `data/migrate/status.json` and log through `/mesh`. Exit 75 means a migration is
-    already running.
+    already running;
+  - `tools/set-routing-mode.sh auto | tunnel --revert-after 300 | confirm`, the
+    Diagnostics page's routing mode. The template demotes the agent below the tunnel
+    (it stays registered) and schedules a systemd timer that switches back to `auto`
+    unless `confirm` comes first: the console is reached over the path being changed.
+    The state is `MESH_ROUTING_FORCE` in `.env` plus `data/routing/force.json`
+    (`revertAt`). Exit 75 busy, 76 routing held by a migration (both → HTTP 409).
 
   A template without a tool gets a read-only page that says why. Each runs as a
   one-shot container `mesh-console-runner` created from this same image with
@@ -73,7 +79,7 @@ browser ─► mesh-router-caddy ─► mesh-console (AppShield gate, OIDC_REQUI
 | `IDENTITY_ASSERTION_AUDIENCE` | `mesh-console` | Must equal the gate's APP_NAME (its hostname) |
 | `MESH_DIR` | `/mesh` | Mesh root as mounted here (read-only) |
 | `MESH_HOST_ROOT` | `/DATA/AppData/mesh` | `MESH_DIR` as the host sees it |
-| `TEMPLATE_SCRIPTS` | `$MESH_HOST_ROOT/scripts` | The template's scripts directory, as the host sees it — the host actions run `self-check.sh` and `tools/set-default-app.sh` from here. A Yundera PCS: `/DATA/AppData/yundera/template/scripts` |
+| `TEMPLATE_SCRIPTS` | `$MESH_HOST_ROOT/scripts` | The template's scripts directory, as the host sees it — the host actions run `self-check.sh` and the `tools/` scripts from here. A Yundera PCS runs the stock mesh template too, so the default is right there as well |
 | `LOG_FILE` | `$MESH_DIR/log/mesh.log` | The self-check log as mounted here. A Yundera PCS: `/mesh/log/yundera.log` |
 | `DEFAULT_APP_EDIT` | on | `false` turns the default-app editor off. It is also off, with the reason shown, when the template has no `tools/set-default-app.sh` |
 | `PLATFORM_PROJECTS` | `mesh,maison,mesh-console` | Compose projects listed as platform containers |
