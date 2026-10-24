@@ -107,6 +107,32 @@
     }
   }
 
+  // ---- nameserver answer (delegated zones) ----------------------------------
+
+  let dnsSetting = $state<'gateway' | 'auto' | null>(null)
+  let dnsResult = $state<{ ok: boolean; message: string; output?: string } | null>(null)
+
+  async function setDnsForce(force: 'gateway' | 'auto') {
+    dnsResult = null
+    dnsSetting = force
+    try {
+      await api.post('/api/dns/force', { force })
+      dnsResult = {
+        ok: true,
+        message:
+          force === 'gateway'
+            ? 'Your names now answer the gateway. Browsers follow within a minute.'
+            : 'Back to automatic: your names answer the box directly when it can serve them itself.',
+      }
+    } catch (e) {
+      const body = e instanceof ApiError ? (e.body as { result?: { output?: string } } | undefined) : undefined
+      dnsResult = { ok: false, message: (e as Error).message, output: body?.result?.output }
+    } finally {
+      dnsSetting = null
+      await loadRouting()
+    }
+  }
+
   function pathReason(r: Routing): string {
     const s = r.state
     if (!s) return ''
@@ -364,6 +390,40 @@
         {#if forceResult}
           <p><Pill tone={forceResult.ok ? 'ok' : 'bad'}>{forceResult.ok ? 'done' : 'problem'}</Pill> <span class="small">{forceResult.message}</span></p>
           {#if forceResult.output}<pre class="out">{forceResult.output}</pre>{/if}
+        {/if}
+
+        {#if routing.dns?.delegated}
+          <h3>Nameserver</h3>
+          <p class="small">
+            <Pill tone={routing.dns.answer === 'direct' ? 'ok' : 'neutral'}>
+              {routing.dns.answer === 'direct' ? 'answers the box' : 'answers the gateway'}
+            </Pill>
+            {#if !routing.dns.live}<Pill tone="warn">delegation not live yet</Pill>{/if}
+            <span class="subtle">{routing.dns.reason}</span>
+          </p>
+          {#if !routing.dns.editable}
+            <p class="muted small">Cannot be changed here: {routing.dns.blocked}.</p>
+          {:else if routing.dns.force === 'gateway'}
+            <p class="small"><strong>Through the gateway</strong> — your names answer the gateway even when the box could be reached directly.</p>
+            <div class="actions">
+              <button onclick={() => setDnsForce('auto')} disabled={dnsSetting !== null}>
+                {dnsSetting === 'auto' ? 'Switching…' : 'Back to automatic'}
+              </button>
+            </div>
+          {:else if routing.dns.force === 'direct'}
+            <p class="small"><strong>Direct (set by an administrator)</strong> — your names answer the box.</p>
+          {:else}
+            <p class="small"><strong>Automatic</strong> — your names answer the box once it serves them with a trusted certificate, the gateway otherwise.</p>
+            <div class="actions">
+              <button onclick={() => setDnsForce('gateway')} disabled={dnsSetting !== null}>
+                {dnsSetting === 'gateway' ? 'Switching…' : 'Route through the gateway'}
+              </button>
+            </div>
+          {/if}
+          {#if dnsResult}
+            <p><Pill tone={dnsResult.ok ? 'ok' : 'bad'}>{dnsResult.ok ? 'done' : 'problem'}</Pill> <span class="small">{dnsResult.message}</span></p>
+            {#if dnsResult.output}<pre class="out">{dnsResult.output}</pre>{/if}
+          {/if}
         {/if}
       {/if}
     </Card>

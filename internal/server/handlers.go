@@ -122,6 +122,9 @@ func (s *Server) gatherRouting(ctx context.Context, env meshenv.Env, local bool)
 		out["routes"] = res.Routes
 		out["routesTtl"] = res.RoutesTTL
 		out["lastSeenOnline"] = res.LastSeenOnline
+		if res.DNS != nil {
+			out["dns"] = s.dnsState(*res.DNS)
+		}
 	}
 	if c, err := probe.AgentCert(s.cfg.MeshDir); err != nil {
 		out["certError"] = err.Error()

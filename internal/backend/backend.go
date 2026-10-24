@@ -44,6 +44,20 @@ type Resolution struct {
 	Routes         []Route `json:"routes"`
 	RoutesTTL      int     `json:"routesTtl"`
 	LastSeenOnline *string `json:"lastSeenOnline"`
+	// What the mesh nameservers do for the box's names; absent when the backend
+	// runs no user zones.
+	DNS *DNS `json:"dns,omitempty"`
+}
+
+// DNS is the backend's nameserver view of the box (/resolve/v2 `dns`).
+type DNS struct {
+	Delegated    bool              `json:"delegated"`
+	Live         bool              `json:"live"` // the parent zone really delegates to the mesh nameservers
+	Force        string            `json:"force"`
+	HostForce    map[string]string `json:"hostForce,omitempty"`
+	Answer       string            `json:"answer"` // direct | gateway
+	Reason       string            `json:"reason"`
+	CertNotAfter *string           `json:"certNotAfter"`
 }
 
 type Client struct {

@@ -159,6 +159,26 @@ func SetRoutingMode(scripts, mode string) (Verb, error) {
 	return Verb{Name: "set-routing-mode", Argv: argv}, nil
 }
 
+// SetDNSForceTool is the template's action for what the mesh nameservers answer for
+// the box's names once its zone is delegated: `gateway` (the owner's "route through
+// the gateway") or `auto`. The template holds the box credential and calls the
+// backend; the console never sees the signature. Exit 0 applied, 2 bad arguments,
+// 1 the backend refused or was unreachable.
+const SetDNSForceTool = "tools/set-dns-force.sh"
+
+// SetDNSForce sets the owner's nameserver answer: gateway or auto.
+func SetDNSForce(scripts, force string) (Verb, error) {
+	if err := checkRoot(scripts); err != nil {
+		return Verb{}, err
+	}
+	switch force {
+	case "gateway", "auto":
+	default:
+		return Verb{}, fmt.Errorf("unknown DNS force %q", force)
+	}
+	return Verb{Name: "set-dns-force", Argv: []string{"bash", path.Join(scripts, SetDNSForceTool), force}}, nil
+}
+
 var rootRe = regexp.MustCompile(`^/[a-zA-Z0-9/_.-]+$`)
 
 func checkRoot(p string) error {

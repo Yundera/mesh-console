@@ -93,6 +93,7 @@ func (s *Server) routes(uiFS fs.FS) http.Handler {
 		api.Get("/overview", s.handleOverview)
 		api.Get("/routing", s.handleRouting)
 		api.Post("/routing/force", s.handleSetRoutingForce)
+		api.Post("/dns/force", s.handleSetDNSForce)
 		api.Get("/stack", s.handleStack)
 		api.Get("/update", s.handleUpdate)
 		api.Post("/update/run", s.handleUpdateRun)

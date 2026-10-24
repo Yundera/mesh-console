@@ -130,6 +130,24 @@ func TestSetUpdateChannel(t *testing.T) {
 	}
 }
 
+func TestSetDNSForce(t *testing.T) {
+	const scripts = "/DATA/AppData/mesh/scripts"
+	for _, f := range []string{"gateway", "auto"} {
+		v, err := SetDNSForce(scripts, f)
+		if err != nil || strings.Join(v.Argv, "|") != "bash|/DATA/AppData/mesh/scripts/tools/set-dns-force.sh|"+f || v.Detached {
+			t.Fatalf("%s: %+v %v", f, v, err)
+		}
+	}
+	for _, bad := range []string{"", "direct", "Gateway", "gateway;id", "auto --host x"} {
+		if _, err := SetDNSForce(scripts, bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	if _, err := SetDNSForce("/DATA/$(id)", "auto"); err == nil {
+		t.Error("bad scripts dir accepted")
+	}
+}
+
 func TestSetRoutingMode(t *testing.T) {
 	const scripts = "/DATA/AppData/mesh/scripts"
 	v, err := SetRoutingMode(scripts, "tunnel")

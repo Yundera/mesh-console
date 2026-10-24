@@ -92,6 +92,21 @@ export interface Routing {
   rootDomain?: { status: number; error?: string; catchall: boolean }
   force?: RoutingForce
   boxCert?: BoxCert
+  dns?: DnsState
+}
+
+// What the mesh nameservers answer for the box's names (backend /resolve/v2 `dns`,
+// internal/server/reach.go dnsState).
+export interface DnsState {
+  delegated: boolean
+  live: boolean
+  force: 'auto' | 'gateway' | 'direct'
+  hostForce?: Record<string, 'gateway' | 'direct'>
+  answer: 'direct' | 'gateway'
+  reason: string
+  certNotAfter: string | null
+  editable: boolean
+  blocked?: string
 }
 
 // MESH_ROUTING_FORCE as the template applies it (internal/server/reach.go).

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/yundera/mesh-console/internal/backend"
 	"github.com/yundera/mesh-console/internal/certs"
 	"github.com/yundera/mesh-console/internal/hostverb"
 	"github.com/yundera/mesh-console/internal/meshenv"
@@ -53,6 +54,57 @@ func (s *Server) routingForce(env meshenv.Env, now time.Time) routingForce {
 		f.Editable = true
 	}
 	return f
+}
+
+// dnsState is the backend's nameserver view plus whether this box can change the
+// owner's choice (the template ships the tool).
+type dnsState struct {
+	backend.DNS
+	Editable bool   `json:"editable"`
+	Blocked  string `json:"blocked,omitempty"`
+}
+
+func (s *Server) dnsState(d backend.DNS) dnsState {
+	st := dnsState{DNS: d}
+	switch {
+	case !d.Delegated:
+		st.Blocked = "the box's zone is not delegated to the mesh nameservers"
+	case !s.templateHasTool(hostverb.SetDNSForceTool):
+		st.Blocked = "this box's template does not ship " + hostverb.SetDNSForceTool + " yet - it arrives with a template update"
+	default:
+		st.Editable = true
+	}
+	return st
+}
+
+// handleSetDNSForce is the owner's "route through the gateway" (gateway | auto).
+func (s *Server) handleSetDNSForce(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Force string `json:"force"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	verb, err := hostverb.SetDNSForce(s.cfg.Scripts(), body.Force)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.templateHasTool(hostverb.SetDNSForceTool) {
+		writeError(w, http.StatusForbidden, "this box's template does not ship "+hostverb.SetDNSForceTool+" yet")
+		return
+	}
+	res, err := s.runVerb(r.Context(), verb)
+	if err != nil {
+		s.verbError(w, err)
+		return
+	}
+	if res.ExitCode != 0 {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": "the backend did not take the change", "result": res})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"result": res})
 }
 
 type boxCertCache struct {
