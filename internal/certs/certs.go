@@ -3,7 +3,8 @@
 //
 // Only sslip.io addresses are covered: per the template Caddyfile they are the
 // ones issued by Let's Encrypt (with Caddy's internal CA as the fallback
-// issuer). The box domain and *.nip.io use the mesh CA cert (gateway_tls),
+// issuer). The box domain and its IP names (<ip>.<IP_ZONE>, or <ip>.nip.io without
+// IP_ZONE) use the mesh CA cert (gateway_tls),
 // which is the agent certificate reported separately.
 package certs
 

@@ -57,8 +57,10 @@ export interface Overview {
   publicIpv6: string
   publicIpMode: 'egress' | 'interface' | string
   ipDash: string
+  /** IP_ZONE: the box's IP names are <ipDash>.<ipZone>; empty = <ipDash>.nip.io */
+  ipZone?: string
   email: string
-  links: { root: string; maison: string; dashboard?: string; sslip?: string; nip?: string }
+  links: { root: string; maison: string; dashboard?: string; sslip?: string; ipName?: string; nip?: string }
   backendError: string
 }
 
@@ -235,6 +237,8 @@ export interface SelfCheck {
 export interface DomainInfo {
   domain: string
   ipDash: string
+  /** IP_ZONE: the box's IP names are <ipDash>.<ipZone>; empty = <ipDash>.nip.io */
+  ipZone?: string
   publicIp: string
   defaultHost: string
   defaultPort: string
@@ -328,6 +332,7 @@ export interface CertRow {
 
 export interface Certificates {
   snapshotAt: string
+  ipZone?: string
   gateway?: { subject: string; dnsNames: string[]; notBefore: string; notAfter: string; issuer: string; renewal: Renewal }
   gatewayError?: string
   certs?: CertRow[]

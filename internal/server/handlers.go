@@ -29,7 +29,10 @@ type links struct {
 	Maison    string `json:"maison"`
 	Dashboard string `json:"dashboard,omitempty"`
 	Sslip     string `json:"sslip,omitempty"`
-	Nip       string `json:"nip,omitempty"`
+	// IPName is <ip>.<IP_ZONE> (mesh CA); Nip the <ip>.nip.io it replaces on a box
+	// without IP_ZONE (FOSS).
+	IPName string `json:"ipName,omitempty"`
+	Nip    string `json:"nip,omitempty"`
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +59,11 @@ func (s *Server) overviewData(ctx context.Context, env meshenv.Env) map[string]a
 	}
 	if ipDash != "" {
 		l.Sslip = "https://" + ipDash + ".sslip.io"
-		l.Nip = "https://" + ipDash + ".nip.io"
+		if zone := env.Get("IP_ZONE"); zone != "" {
+			l.IPName = "https://" + ipDash + "." + zone
+		} else {
+			l.Nip = "https://" + ipDash + ".nip.io"
+		}
 	}
 	return map[string]any{
 		"domain":       domain,
@@ -67,6 +74,7 @@ func (s *Server) overviewData(ctx context.Context, env meshenv.Env) map[string]a
 		"publicIpv6":   env.Get("PUBLIC_IPV6"),
 		"publicIpMode": orDefault(env.Get("PUBLIC_IP_MODE"), "egress"),
 		"ipDash":       ipDash,
+		"ipZone":       env.Get("IP_ZONE"),
 		"email":        env.Get("EMAIL"),
 		"links":        l,
 		"backendError": errString(idErr),
@@ -455,6 +463,7 @@ func (s *Server) handleDomain(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"domain":      env.Get("DOMAIN"),
 		"ipDash":      env.Get("PUBLIC_IP_DASH"),
+		"ipZone":      env.Get("IP_ZONE"),
 		"publicIp":    env.Get("PUBLIC_IP"),
 		"defaultHost": orDefault(env.Get("DEFAULT_SERVICE_HOST"), "maison"),
 		"defaultPort": orDefault(env.Get("DEFAULT_SERVICE_PORT"), "80"),

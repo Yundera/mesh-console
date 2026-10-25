@@ -88,7 +88,7 @@
           <dt>Direct (Let’s Encrypt)</dt>
           <dd class="mono">{info.ipDash}.sslip.io</dd>
           <dt>Direct (mesh CA)</dt>
-          <dd class="mono">{info.ipDash}.nip.io</dd>
+          <dd class="mono">{info.ipDash}.{info.ipZone || 'nip.io'}</dd>
         {/if}
         <dt>Root domain serves</dt>
         <dd class="mono">{info.defaultHost}:{info.defaultPort}</dd>
