@@ -13,8 +13,8 @@
 
 <script lang="ts">
   import Pill from './Pill.svelte'
-  import type { BoxCert, Lane, Mode, Overview, Routing, Trace } from './api'
-  import { ago } from './format'
+  import type { BoxCert, Lane, Mode, Overview, Routing, Trace, TraceStats } from './api'
+  import { ago, millis } from './format'
 
   let {
     routing,
@@ -445,6 +445,15 @@
         return c.error ?? 'Caddy did not answer the handshake'
     }
   }
+  // Who answers the TCP handshake, so what the ping measures.
+  function pingTarget(t: Trace): string {
+    return t.entry === 'box' ? 'this box' : t.entry === 'cloudflare' ? 'a Cloudflare edge' : t.entry === 'gateway' ? 'the gateway' : 'the address it reached'
+  }
+  function errorRate(s: TraceStats): string {
+    const all = s.count + s.errors
+    return all ? `${((100 * s.errors) / all).toFixed(s.errors && s.errors < all / 100 ? 1 : 0)}%` : '—'
+  }
+
   const ipModeExplain: Record<string, string> = {
     egress: 'the address it connects from',
     interface: 'an address bound on this machine',
@@ -500,6 +509,40 @@
           {/if}
         {/if}
       </figcaption>
+      {#if g.path?.trace?.timing || g.path?.trace?.latency}
+        {@const t = g.path.trace}
+        <dl class="stats">
+          {#if t.ping}
+            <div title="TCP handshake to {pingTarget(t)}, median and 95th percentile over {t.ping.count} probes since {ago(t.ping.since)}">
+              <dt>Ping</dt>
+              <dd>{millis(t.ping.p50)} <span class="subtle">p95 {millis(t.ping.p95)}</span></dd>
+            </div>
+          {/if}
+          {#if t.latency && t.latency.count}
+            <div title="Round trips on an open connection, {t.latency.count} requests since {ago(t.latency.since)}; min {millis(t.latency.min)}, max {millis(t.latency.max)}">
+              <dt>Request p50 · p95 · p99</dt>
+              <dd>{millis(t.latency.p50)} · {millis(t.latency.p95)} · {millis(t.latency.p99)}</dd>
+            </div>
+          {/if}
+          {#if t.timing}
+            <div title="The last probe on a fresh connection: DNS, TCP connect, TLS handshake, then the request until the first byte of the answer">
+              <dt>Cold request</dt>
+              <dd>
+                {millis(t.timing.total)}
+                <span class="subtle">
+                  = DNS {millis(t.timing.dns)} + TCP {millis(t.timing.connect)} + TLS {millis(t.timing.tls)} + answer {millis(t.timing.firstByte)}
+                </span>
+              </dd>
+            </div>
+          {/if}
+          {#if t.latency}
+            <div title="Requests that got no answer, out of {t.latency.count + t.latency.errors}">
+              <dt>Errors</dt>
+              <dd>{errorRate(t.latency)} <span class="subtle">of {t.latency.count + t.latency.errors}</span></dd>
+            </div>
+          {/if}
+        </dl>
+      {/if}
       <svg
         viewBox="0 0 {viewW} {viewH}"
         width="100%"
@@ -619,6 +662,25 @@
     margin-top: 1rem;
     padding-top: 0.75rem;
     border-top: 1px solid var(--border);
+  }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.4rem;
+    margin: 0 0 0.5rem;
+    font-size: 0.8rem;
+  }
+  .stats div {
+    min-width: 0;
+  }
+  .stats dt {
+    font-size: 0.7rem;
+    color: var(--text-subtle);
+  }
+  .stats dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
   }
   figcaption {
     display: flex;

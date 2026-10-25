@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -191,7 +192,54 @@ type traceCache struct {
 const (
 	traceTTL      = 20 * time.Second // the page polls every 3 s during a forced-tunnel trial
 	traceFreshMin = 5 * time.Second  // Refresh may skip the cache, but not hammer the gateways
+	traceWindow   = time.Hour        // how far back Ping and Latency look
 )
+
+// traceSample is one probe of a name, kept for the Ping/Latency percentiles.
+type traceSample struct {
+	at      time.Time
+	connect float64   // 0 when the probe got no answer
+	rtts    []float64 // the warm round trips
+	failed  int       // warm requests, plus the probe itself when it got no answer
+}
+
+// traceHistory keeps the probes of each name over traceWindow, in memory: it
+// starts empty on restart and only grows while someone has Diagnostics open.
+type traceHistory map[string][]traceSample
+
+func (h traceHistory) add(t probe.Trace) {
+	smp := traceSample{at: t.CheckedAt, rtts: t.Samples, failed: t.Failed}
+	if t.Timing != nil {
+		smp.connect = t.Timing.Connect
+	} else {
+		smp.failed++
+	}
+	cut := t.CheckedAt.Add(-traceWindow)
+	kept := slices.DeleteFunc(h[t.Host], func(x traceSample) bool { return x.at.Before(cut) })
+	h[t.Host] = append(kept, smp)
+}
+
+// summarize fills Ping and Latency on t from its name's history.
+func (h traceHistory) summarize(t *probe.Trace) {
+	hist := h[t.Host]
+	if len(hist) == 0 {
+		return
+	}
+	var pings, rtts []float64
+	pingErr, rttErr := 0, 0
+	for _, x := range hist {
+		if x.connect > 0 {
+			pings = append(pings, x.connect)
+		} else {
+			pingErr++
+		}
+		rtts = append(rtts, x.rtts...)
+		rttErr += x.failed
+	}
+	since := hist[0].at
+	t.Ping = probe.Summarize(pings, pingErr, since)
+	t.Latency = probe.Summarize(rtts, rttErr, since)
+}
 
 // traceHosts are the names traced, fixed by DOMAIN and never taken from the
 // request: this page under both of its names. mesh-console.<domain> is in the
@@ -235,6 +283,13 @@ func (s *Server) traces(ctx context.Context, env meshenv.Env, fresh bool) []prob
 	}
 	wg.Wait()
 	s.traceMu.Lock()
+	if s.traceHist == nil {
+		s.traceHist = traceHistory{}
+	}
+	for i := range out {
+		s.traceHist.add(out[i])
+		s.traceHist.summarize(&out[i])
+	}
 	s.traceCache = &traceCache{at: time.Now(), domain: domain, val: out}
 	s.traceMu.Unlock()
 	return out

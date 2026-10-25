@@ -113,6 +113,25 @@ export interface Trace {
   lane: Lane
   error?: string
   checkedAt: string
+  // The first request's phases, in ms (fresh connection).
+  timing?: { dns: number; connect: number; tls: number; firstByte: number; total: number }
+  // Round trips of the requests that follow on the same connection, in ms.
+  samples?: number[]
+  failed?: number
+  // Recent probes of this name: TCP connect (about a ping) and the round trips.
+  ping?: TraceStats
+  latency?: TraceStats
+}
+
+export interface TraceStats {
+  count: number
+  errors: number
+  since: string
+  min: number
+  p50: number
+  p95: number
+  p99: number
+  max: number
 }
 
 // What the mesh nameservers answer for the box's names (backend /resolve/v2 `dns`,

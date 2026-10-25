@@ -3,6 +3,7 @@ package probe
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestClassify(t *testing.T) {
@@ -45,5 +46,25 @@ func TestSplitRoute(t *testing.T) {
 	}
 	if got := splitRoute(""); got != nil {
 		t.Fatalf("empty: %v", got)
+	}
+}
+
+func TestSummarize(t *testing.T) {
+	if Summarize(nil, 0, time.Time{}) != nil {
+		t.Fatal("empty series should be nil")
+	}
+	v := make([]float64, 100)
+	for i := range v {
+		v[i] = float64(100 - i) // 100..1, unsorted on purpose
+	}
+	s := Summarize(v, 2, time.Time{})
+	if s.Count != 100 || s.Errors != 2 || s.Min != 1 || s.P50 != 50 || s.P95 != 95 || s.P99 != 99 || s.Max != 100 {
+		t.Fatalf("got %+v", s)
+	}
+	if s := Summarize([]float64{7}, 0, time.Time{}); s.P50 != 7 || s.P99 != 7 {
+		t.Fatalf("one sample: %+v", s)
+	}
+	if s := Summarize(nil, 3, time.Time{}); s == nil || s.Count != 0 || s.Errors != 3 {
+		t.Fatalf("errors only: %+v", s)
 	}
 }

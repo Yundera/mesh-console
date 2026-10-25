@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"slices"
 	"strings"
 	"time"
@@ -49,7 +51,31 @@ type Trace struct {
 	Lane      Lane      `json:"lane"`
 	Error     string    `json:"error,omitempty"`
 	CheckedAt time.Time `json:"checkedAt"`
+	// Timing breaks down the first request, made on a fresh connection.
+	Timing *Timing `json:"timing,omitempty"`
+	// Samples are the round trips of the requests that follow it on the same
+	// connection, in ms; Failed counts the ones that got no answer.
+	Samples []float64 `json:"samples,omitempty"`
+	Failed  int       `json:"failed,omitempty"`
+	// Ping and Latency summarise the recent probes of this name (the server keeps
+	// the history): TCP connect time, and the samples' round trips.
+	Ping    *Stats `json:"ping,omitempty"`
+	Latency *Stats `json:"latency,omitempty"`
 }
+
+// Timing is one request's phases, in ms. Connect is the TCP handshake, so about
+// one network round trip to whatever answered the name (the box, a Cloudflare
+// edge, the gateway): the closest thing to a ping without ICMP.
+type Timing struct {
+	DNS       float64 `json:"dns"`
+	Connect   float64 `json:"connect"`
+	TLS       float64 `json:"tls"`
+	FirstByte float64 `json:"firstByte"` // request sent → response headers
+	Total     float64 `json:"total"`
+}
+
+// warmSamples is how many requests follow the first one on its connection.
+const warmSamples = 4
 
 // Public resolvers, so the answer is the one visitors get rather than Docker's
 // embedded DNS or the host's /etc/hosts.
@@ -61,7 +87,9 @@ var publicResolvers = []string{"1.1.1.1:53", "8.8.8.8:53"}
 // login) is a routed answer and is not followed.
 func TraceHost(ctx context.Context, host string, boxIPs []string) Trace {
 	t := Trace{Host: host, CheckedAt: time.Now().UTC(), Hops: []string{}}
+	start := time.Now()
 	ips, err := lookupPublic(ctx, host)
+	dnsDone := time.Now()
 	if err != nil {
 		t.Error = "DNS: " + err.Error()
 		t.Entry, t.Lane = EntryUnknown, LaneUnknown
@@ -83,24 +111,80 @@ func TraceHost(ctx context.Context, host string, boxIPs []string) Trace {
 		Timeout:       8 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+host+"/", nil)
+	newReq := func(ctx context.Context) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+host+"/", nil)
+		if err == nil {
+			req.Header.Set("X-Mesh-Trace", "1")
+		}
+		return req, err
+	}
+
+	var connStart, connDone, tlsStart, tlsDone, wrote, firstByte time.Time
+	ct := &httptrace.ClientTrace{
+		ConnectStart:         func(string, string) { connStart = time.Now() },
+		ConnectDone:          func(string, string, error) { connDone = time.Now() },
+		TLSHandshakeStart:    func() { tlsStart = time.Now() },
+		TLSHandshakeDone:     func(tls.ConnectionState, error) { tlsDone = time.Now() },
+		WroteRequest:         func(httptrace.WroteRequestInfo) { wrote = time.Now() },
+		GotFirstResponseByte: func() { firstByte = time.Now() },
+	}
+	req, err := newReq(httptrace.WithClientTrace(ctx, ct))
 	if err != nil {
 		t.Error = err.Error()
 		t.Entry, t.Lane = EntryUnknown, LaneUnknown
 		return t
 	}
-	req.Header.Set("X-Mesh-Trace", "1")
 	resp, err := cl.Do(req)
 	if err != nil {
 		t.Error = err.Error()
 	} else {
-		resp.Body.Close()
+		drain(resp)
 		t.Status = resp.StatusCode
 		t.CFRay = resp.Header.Get("Cf-Ray") != ""
 		t.Route = splitRoute(resp.Header.Get("X-Mesh-Route"))
+		t.Timing = &Timing{
+			DNS:       ms(dnsDone.Sub(start)),
+			Connect:   ms(connDone.Sub(connStart)),
+			TLS:       ms(tlsDone.Sub(tlsStart)),
+			FirstByte: ms(firstByte.Sub(wrote)),
+			Total:     ms(time.Since(start)),
+		}
 	}
 	t.Entry, t.Hops, t.Lane = Classify(t.Connected, boxIPs, t.CFRay, t.Route)
+	if err != nil {
+		return t
+	}
+
+	// The same request again on the open connection: round trips with no
+	// handshake, so the spread is the path's and not the setup's.
+	for range warmSamples {
+		req, err := newReq(ctx)
+		if err != nil {
+			break
+		}
+		at := time.Now()
+		resp, err := cl.Do(req)
+		if err != nil {
+			t.Failed++
+			continue
+		}
+		drain(resp)
+		t.Samples = append(t.Samples, ms(time.Since(at)))
+	}
 	return t
+}
+
+// drain reads what is left of a body so the connection can be reused.
+func drain(resp *http.Response) {
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 256<<10))
+	resp.Body.Close()
+}
+
+func ms(d time.Duration) float64 {
+	if d < 0 {
+		return 0
+	}
+	return float64(d.Microseconds()) / 1000
 }
 
 func lookupPublic(ctx context.Context, host string) ([]string, error) {

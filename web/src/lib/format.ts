@@ -26,3 +26,11 @@ export function duration(s: number | undefined): string {
   if (s < 60) return `${s}s`
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
+
+// A duration in ms, to the precision it is worth: 0.4 ms, 12 ms, 1.3 s.
+export function millis(ms: number | undefined): string {
+  if (ms === undefined) return '—'
+  if (ms < 10) return `${ms.toFixed(1)} ms`
+  if (ms < 1000) return `${Math.round(ms)} ms`
+  return `${(ms / 1000).toFixed(1)} s`
+}
