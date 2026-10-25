@@ -234,8 +234,21 @@ export interface SelfCheck {
   error?: string
 }
 
+/** The form of the box's primary app names (the template's MESH_PRIMARY_FORM). */
+export interface PrimaryForm {
+  /** the owner's choice */
+  setting: 'dash' | 'dot'
+  /** the form in effect: dot only while the box serves it */
+  active: 'dash' | 'dot'
+  /** zone delegated to the mesh nameservers and wildcard certificate issued */
+  dotReady: boolean
+  editable: boolean
+  blocked?: string
+}
+
 export interface DomainInfo {
   domain: string
+  primaryForm?: PrimaryForm
   ipDash: string
   /** IP_ZONE: the box's IP names are <ipDash>.<ipZone>; empty = <ipDash>.nip.io */
   ipZone?: string

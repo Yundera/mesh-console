@@ -148,6 +148,24 @@ func TestSetDNSForce(t *testing.T) {
 	}
 }
 
+func TestSetPrimaryForm(t *testing.T) {
+	const scripts = "/DATA/AppData/mesh/scripts"
+	for _, f := range []string{"dash", "dot"} {
+		v, err := SetPrimaryForm(scripts, f)
+		if err != nil || strings.Join(v.Argv, "|") != "bash|/DATA/AppData/mesh/scripts/tools/set-primary-form.sh|"+f || v.Detached {
+			t.Fatalf("%s: %+v %v", f, v, err)
+		}
+	}
+	for _, bad := range []string{"", "Dot", "dot;id", "dash dot", "auto"} {
+		if _, err := SetPrimaryForm(scripts, bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	if _, err := SetPrimaryForm("/DATA/$(id)", "dot"); err == nil {
+		t.Error("bad scripts dir accepted")
+	}
+}
+
 func TestSetRoutingMode(t *testing.T) {
 	const scripts = "/DATA/AppData/mesh/scripts"
 	v, err := SetRoutingMode(scripts, "tunnel")

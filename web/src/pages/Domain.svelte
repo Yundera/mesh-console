@@ -26,6 +26,31 @@
     load()
   })
 
+  let formSaving = $state<'dash' | 'dot' | null>(null)
+  let formResult = $state<{ ok: boolean; message: string; output?: string } | null>(null)
+  const pf = $derived(info?.primaryForm)
+
+  async function setForm(form: 'dash' | 'dot') {
+    formResult = null
+    formSaving = form
+    try {
+      await api.post('/api/domain/primary-form', { form })
+      formResult = {
+        ok: true,
+        message:
+          form === 'dot'
+            ? 'Done. Maison restarts each app on its new address: a minute or so of errors per app, and one sign-in per app.'
+            : 'Done. Apps are back on their dash addresses.',
+      }
+      await load()
+    } catch (e) {
+      const body = e instanceof ApiError ? (e.body as { result?: { output?: string } } | undefined) : undefined
+      formResult = { ok: false, message: (e as Error).message, output: body?.result?.output }
+    } finally {
+      formSaving = null
+    }
+  }
+
   const selected = $derived(info?.candidates?.find((c) => c.name === host))
   const ports = $derived(selected?.ports ?? [])
   const changed = $derived(!!info && (host !== info.defaultHost || String(port) !== info.defaultPort))
@@ -83,7 +108,9 @@
         <dt>Domain</dt>
         <dd><a href={`https://${info.domain}`} target="_blank" rel="noopener">{info.domain}</a></dd>
         <dt>Apps</dt>
-        <dd class="mono">&lt;app&gt;-{info.domain}</dd>
+        <dd class="mono">
+          {#if info.primaryForm?.active === 'dot'}&lt;app&gt;.{info.domain}{:else}&lt;app&gt;-{info.domain}{/if}
+        </dd>
         {#if info.ipDash}
           <dt>Direct (Let’s Encrypt)</dt>
           <dd class="mono">{info.ipDash}.sslip.io</dd>
@@ -95,6 +122,47 @@
       </dl>
     {/if}
   </Card>
+
+  {#if pf}
+    <Card title="App addresses">
+      <p class="muted small">
+        Every app answers on both <code>&lt;app&gt;-{info?.domain}</code> and <code>&lt;app&gt;.{info?.domain}</code>.
+        This picks the one Maison opens and gives the apps as their own address. The dot form needs this box's
+        domain to be served by the mesh nameservers, with its certificate issued. Platform pages (this console,
+        Maison's sign-in) keep their dash addresses.
+      </p>
+      <div class="choices">
+        <button class:primary={pf.active === 'dash'} onclick={() => setForm('dash')}
+          disabled={!pf.editable || formSaving !== null || pf.setting === 'dash'}>
+          {formSaving === 'dash' ? 'Applying…' : `app-${info?.domain}`}
+        </button>
+        <button class:primary={pf.active === 'dot'} onclick={() => setForm('dot')}
+          disabled={!pf.editable || formSaving !== null || pf.setting === 'dot' || !pf.dotReady}>
+          {formSaving === 'dot' ? 'Applying…' : `app.${info?.domain}`}
+        </button>
+      </div>
+      {#if !pf.editable}
+        <p class="small">Changing it from here is {pf.blocked ?? 'disabled on this box'}.</p>
+      {:else if pf.setting === 'dot' && pf.active !== 'dot'}
+        <p class="small warn-text">
+          The dot form is chosen but not in effect: this box cannot serve it right now (its domain is not served by the
+          mesh nameservers, or the certificate is missing). Apps stay on their dash addresses until it can.
+        </p>
+      {:else if !pf.dotReady}
+        <p class="subtle small">
+          The dot form becomes available once this box's domain is served by the mesh nameservers and its certificate
+          is issued.
+        </p>
+      {/if}
+      {#if formResult}
+        <p>
+          <Pill tone={formResult.ok ? 'ok' : 'bad'}>{formResult.ok ? 'done' : 'problem'}</Pill>
+          {formResult.message}
+        </p>
+        {#if formResult.output}<pre class="out">{formResult.output}</pre>{/if}
+      {/if}
+    </Card>
+  {/if}
 
   <Card title="Default application">
     <p class="muted small">
@@ -171,6 +239,18 @@
 </div>
 
 <style>
+  .warn-text {
+    color: var(--warn-fg);
+  }
+  .choices {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 0.75rem 0;
+  }
+  .choices button {
+    font-family: var(--font-mono, monospace);
+  }
   .stack {
     display: grid;
     gap: 1rem;

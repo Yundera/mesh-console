@@ -179,6 +179,29 @@ func SetDNSForce(scripts, force string) (Verb, error) {
 	return Verb{Name: "set-dns-force", Argv: []string{"bash", path.Join(scripts, SetDNSForceTool), force}}, nil
 }
 
+// SetPrimaryFormTool is the template's action for the form of the box's primary app
+// names: `dash` (<app>-<domain>) or `dot` (<app>.<domain>, only once the box serves
+// it). The template applies it at once (Maison's routing). Exit 0 applied, 2 bad
+// arguments, ExitDotNotReady, ExitBusy while a self-check runs, 1 applying failed.
+const SetPrimaryFormTool = "tools/set-primary-form.sh"
+
+// ExitDotNotReady: dot asked, but the box's zone is not delegated or Caddy has no
+// wildcard certificate for it yet. Nothing was written.
+const ExitDotNotReady = 3
+
+// SetPrimaryForm sets the form of the box's primary app names: dash or dot.
+func SetPrimaryForm(scripts, form string) (Verb, error) {
+	if err := checkRoot(scripts); err != nil {
+		return Verb{}, err
+	}
+	switch form {
+	case "dash", "dot":
+	default:
+		return Verb{}, fmt.Errorf("unknown primary form %q", form)
+	}
+	return Verb{Name: "set-primary-form", Argv: []string{"bash", path.Join(scripts, SetPrimaryFormTool), form}}, nil
+}
+
 var rootRe = regexp.MustCompile(`^/[a-zA-Z0-9/_.-]+$`)
 
 func checkRoot(p string) error {
