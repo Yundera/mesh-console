@@ -194,10 +194,11 @@ const (
 )
 
 // traceHosts are the names traced, fixed by DOMAIN and never taken from the
-// request: the root stands for the box's own zone, mesh-console-<domain> is the
-// name this page is served on.
+// request: this page under both of its names. mesh-console.<domain> is in the
+// box's own zone (the nameserver answers it), mesh-console-<domain> is in the
+// server's zone (Cloudflare, then the worker).
 func traceHosts(domain string) []string {
-	return []string{domain, "mesh-console-" + domain}
+	return []string{"mesh-console." + domain, "mesh-console-" + domain}
 }
 
 // traces requests the box's public names the way a visitor does (probe.TraceHost)

@@ -32,7 +32,8 @@
   type Entry = 'box' | 'cloudflare' | 'gateway'
   type State = 'observed' | 'inferred' | 'idle' | 'unavailable'
 
-  const domain = $derived(overview?.domain ?? routing.trace?.[0]?.host ?? '')
+  // The traced names are mesh-console.<domain> and mesh-console-<domain>.
+  const domain = $derived(overview?.domain ?? routing.trace?.[0]?.host.replace(/^mesh-console[.-]/, '') ?? '')
   const traces = $derived(routing.trace ?? [])
   // A trace that says nothing about the path (no DNS answer, nothing recognised)
   // falls back to what the registry implies.
@@ -237,40 +238,50 @@
   })
 
   const rank: Record<State, number> = { observed: 3, inferred: 2, idle: 1, unavailable: 0 }
-  const edgeState = $derived.by((): Record<EdgeId, State> => {
-    const st = {} as Record<EdgeId, State>
-    for (const e of EDGES) st[e.id] = edgeBlocked[e.id] ? 'unavailable' : 'idle'
-    for (const hp of hostPaths)
-      for (const id of hp.edges) if (rank[hp.state] > rank[st[id]]) st[id] = hp.state
-    // The way out is the one the traces themselves took.
-    st['box-out'] = traces.some((t) => t.status) ? 'observed' : 'idle'
-    return st
-  })
-  const nodeState = $derived.by((): Record<NodeId, State> => {
-    const st = {} as Record<NodeId, State>
+
+  // One diagram per name: the path it took lit, the rest grey.
+  interface Graph {
+    host: string
+    path?: HostPath
+    edge: Record<EdgeId, State>
+    node: Record<NodeId, State>
+    // Clickable grey parts: the hop to switch to, and the lane its action belongs to.
+    targets: Partial<Record<NodeId | EdgeId, Action>>
+  }
+
+  function graphFor(host: string, hp: HostPath | undefined): Graph {
+    const edge = {} as Record<EdgeId, State>
+    for (const e of EDGES) edge[e.id] = edgeBlocked[e.id] ? 'unavailable' : 'idle'
+    if (hp) for (const id of hp.edges) if (rank[hp.state] > rank[edge[id]]) edge[id] = hp.state
+    // The way out is the one the trace itself took.
+    edge['box-out'] = hp?.trace?.status ? 'observed' : 'idle'
+
+    const node = {} as Record<NodeId, State>
     for (const n of NODES) {
-      const touching = EDGES.filter((e) => e.to === n.id || (n.id === 'in' && e.from === 'in')).map((e) => edgeState[e.id])
-      st[n.id] = touching.length
+      const touching = EDGES.filter((e) => e.to === n.id || (n.id === 'in' && e.from === 'in')).map((e) => edge[e.id])
+      node[n.id] = touching.length
         ? touching.reduce((a, b) => (rank[b] > rank[a] ? b : a), 'unavailable' as State)
         : 'idle'
     }
-    st.box = hostPaths.length ? hostPaths.some((h) => h.state === 'observed') ? 'observed' : 'inferred' : 'idle'
-    return st
-  })
+    node.box = hp ? hp.state : 'idle'
 
-  // Clickable grey parts: the hop to switch to, and the lane its action belongs to.
-  const targets = $derived.by((): Partial<Record<NodeId | EdgeId, Action>> => {
-    const t: Partial<Record<NodeId | EdgeId, Action>> = {}
+    const targets: Graph['targets'] = {}
     const lit = (s: State) => s === 'observed' || s === 'inferred'
     const tunnel = actionFor('gateway-tunnel')
-    if (tunnel && !lit(nodeState.tunnel) && nodeState.tunnel !== 'unavailable') t.tunnel = tunnel
+    if (tunnel && !lit(node.tunnel) && node.tunnel !== 'unavailable') targets.tunnel = tunnel
     const agent = actionFor('gateway-agent')
-    if (agent && !lit(nodeState.agent) && nodeState.agent !== 'unavailable') t.agent = agent
-    if (dnsDirect && !lit(nodeState.gateway)) t.gateway = dnsGateway
+    if (agent && !lit(node.agent) && node.agent !== 'unavailable') targets.agent = agent
+    if (dnsDirect && !lit(node.gateway)) targets.gateway = dnsGateway
     const box = actionFor('box-direct')
-    if (box && !lit(edgeState['dns-box'])) t['dns-box'] = box
-    return t
+    if (box && !lit(edge['dns-box'])) targets['dns-box'] = box
+    return { host, path: hp, edge, node, targets }
+  }
+
+  const graphs = $derived.by((): Graph[] => {
+    if (hostPaths.length) return hostPaths.map((hp) => graphFor(hp.host, hp))
+    return [graphFor(domain, undefined)]
   })
+  const anyTargets = $derived(graphs.some((g) => Object.keys(g.targets).length))
 
   // ---- geometry --------------------------------------------------------------
   // Laid out along a flow axis (a) and a cross axis (c); wide containers flow left
@@ -327,9 +338,9 @@
   }
 
   // The worker's way to the box, as it reported it (ip-dns, sslip.io, …).
-  function edgeLabel(e: (typeof EDGES)[number]): string | undefined {
+  function edgeLabel(g: Graph, e: (typeof EDGES)[number]): string | undefined {
     if (e.id === 'worker-box') {
-      const hp = hostPaths.find((h) => h.lane === 'edge-direct' && h.trace)
+      const hp = g.path?.lane === 'edge-direct' ? g.path : undefined
       const hops = hp?.trace?.hops.filter((h) => h !== 'owner-force') ?? []
       return hops.length ? hops.join(' → ') : e.label
     }
@@ -338,20 +349,24 @@
 
   // ---- interaction -------------------------------------------------------------
 
-  let selected = $state<NodeId | EdgeId | null>(null)
+  // The clicked part, and the diagram it was clicked in.
+  let selected = $state<{ host: string; id: NodeId | EdgeId } | null>(null)
   let also = $state(false)
-  const selectedAction = $derived(selected ? targets[selected] : undefined)
+  const selectedAction = $derived(
+    selected ? graphs.find((g) => g.host === selected!.host)?.targets[selected.id] : undefined,
+  )
+  const isSel = (g: Graph, id: NodeId | EdgeId) => selected?.host === g.host && selected.id === id
 
-  function pick(id: NodeId | EdgeId) {
-    const a = targets[id]
+  function pick(g: Graph, id: NodeId | EdgeId) {
+    const a = g.targets[id]
     if (!a || busy) return
-    selected = selected === id ? null : id
+    selected = isSel(g, id) ? null : { host: g.host, id }
     also = a.also?.checked ?? false
   }
-  function key(e: KeyboardEvent, id: NodeId | EdgeId) {
+  function key(e: KeyboardEvent, g: Graph, id: NodeId | EdgeId) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
-      pick(id)
+      pick(g, id)
     }
   }
   function confirm() {
@@ -436,97 +451,104 @@
   }
 </script>
 
-{#snippet nodeBody(id: NodeId)}
+{#snippet nodeBody(g: Graph, id: NodeId)}
   {@const r = nodeRect(id)}
   {@const n = node(id)}
-  <rect class="n {nodeState[id]}" class:sel={selected === id} x={r.x} y={r.y} width={r.w} height={r.h} rx="7" />
-  <text class="nl {nodeState[id]}" x={r.x + r.w / 2} y={r.y + r.h / 2 - 2} text-anchor="middle">{n.label}</text>
-  <text class="ns" class:cta={!!targets[id]} x={r.x + r.w / 2} y={r.y + r.h / 2 + 11} text-anchor="middle">
-    {targets[id] ? 'click to use' : n.sub}
+  <rect class="n {g.node[id]}" class:sel={isSel(g, id)} x={r.x} y={r.y} width={r.w} height={r.h} rx="7" />
+  <text class="nl {g.node[id]}" x={r.x + r.w / 2} y={r.y + r.h / 2 - 2} text-anchor="middle">{n.label}</text>
+  <text class="ns" class:cta={!!g.targets[id]} x={r.x + r.w / 2} y={r.y + r.h / 2 + 11} text-anchor="middle">
+    {g.targets[id] ? 'click to use' : n.sub}
   </text>
 {/snippet}
 
-{#snippet edgeBody(e: (typeof EDGES)[number])}
-  {@const g = edgeGeom(e)}
-  {@const label = edgeLabel(e)}
-  <path class="e {edgeState[e.id]}" class:sel={selected === e.id} d={g.d} marker-end="url(#rm-arrow-{edgeState[e.id]})" />
+{#snippet edgeBody(g: Graph, e: (typeof EDGES)[number])}
+  {@const geo = edgeGeom(e)}
+  {@const label = edgeLabel(g, e)}
+  <path class="e {g.edge[e.id]}" class:sel={isSel(g, e.id)} d={geo.d} marker-end="url(#rm-arrow-{g.edge[e.id]})" />
   {#if label}
-    <text class="el {edgeState[e.id]}" x={g.lx} y={g.ly + 4} text-anchor="middle">{label}</text>
+    <text class="el {g.edge[e.id]}" x={geo.lx} y={geo.ly + 4} text-anchor="middle">{label}</text>
   {/if}
 {/snippet}
 
+<!-- Shared by every diagram below. -->
+<svg class="defs" width="0" height="0" aria-hidden="true">
+  <defs>
+    <pattern id="rm-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="6" height="6" class="hatch-bg" />
+      <line x1="0" y1="0" x2="0" y2="6" class="hatch-line" />
+    </pattern>
+    {#each ['observed', 'inferred', 'idle', 'unavailable'] as s (s)}
+      <marker id="rm-arrow-{s}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" class="arrowhead {s}" />
+      </marker>
+    {/each}
+  </defs>
+</svg>
+
 <div class="wrap" bind:clientWidth={width}>
-  <svg
-    viewBox="0 0 {viewW} {viewH}"
-    width="100%"
-    role="img"
-    aria-label="How traffic reaches this box: lit arrows are in use, grey ones are not"
-  >
-    <defs>
-      <pattern id="rm-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-        <rect width="6" height="6" class="hatch-bg" />
-        <line x1="0" y1="0" x2="0" y2="6" class="hatch-line" />
-      </pattern>
-      {#each ['observed', 'inferred', 'idle', 'unavailable'] as s (s)}
-        <marker id="rm-arrow-{s}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M0,0 L10,5 L0,10 z" class="arrowhead {s}" />
-        </marker>
-      {/each}
-    </defs>
+  {#each graphs as g (g.host)}
+    <figure>
+      <figcaption>
+        <span class="dot {g.path?.state ?? 'neutral'}"></span>
+        <span class="mono host">{g.host}</span>
+        {#if g.path}
+          <span class="small">{pathWords(g.path)}</span>
+          {#if g.path.state === 'observed'}
+            <span class="subtle small">observed {ago(g.path.trace?.checkedAt)}</span>
+          {:else}
+            <span class="subtle small">inferred from the routes</span>
+          {/if}
+        {/if}
+      </figcaption>
+      <svg
+        viewBox="0 0 {viewW} {viewH}"
+        width="100%"
+        role="img"
+        aria-label="How traffic reaches this box for {g.host}: lit arrows are in use, grey ones are not"
+      >
+        {#each EDGES as e (e.id)}
+          {#if g.targets[e.id]}
+            <g class="click" role="button" tabindex="0" aria-label={g.targets[e.id]!.title} onclick={() => pick(g, e.id)} onkeydown={(ev) => key(ev, g, e.id)}>
+              <title>{g.targets[e.id]!.title}</title>
+              {@render edgeBody(g, e)}
+            </g>
+          {:else}
+            <g>
+              {#if edgeBlocked[e.id]}<title>Unavailable: {edgeBlocked[e.id]}</title>{/if}
+              {@render edgeBody(g, e)}
+            </g>
+          {/if}
+        {/each}
 
-    {#each EDGES as e (e.id)}
-      {#if targets[e.id]}
-        <g class="click" role="button" tabindex="0" aria-label={targets[e.id]!.title} onclick={() => pick(e.id)} onkeydown={(ev) => key(ev, e.id)}>
-          <title>{targets[e.id]!.title}</title>
-          {@render edgeBody(e)}
-        </g>
-      {:else}
-        <g>
-          {#if edgeBlocked[e.id]}<title>Unavailable: {edgeBlocked[e.id]}</title>{/if}
-          {@render edgeBody(e)}
-        </g>
-      {/if}
-    {/each}
+        {#each NODES as n (n.id)}
+          {#if g.targets[n.id]}
+            <g class="click" role="button" tabindex="0" aria-label={g.targets[n.id]!.title} onclick={() => pick(g, n.id)} onkeydown={(ev) => key(ev, g, n.id)}>
+              <title>{g.targets[n.id]!.title}</title>
+              {@render nodeBody(g, n.id)}
+            </g>
+          {:else}
+            <g>{@render nodeBody(g, n.id)}</g>
+          {/if}
+        {/each}
+      </svg>
 
-    {#each NODES as n (n.id)}
-      {#if targets[n.id]}
-        <g class="click" role="button" tabindex="0" aria-label={targets[n.id]!.title} onclick={() => pick(n.id)} onkeydown={(ev) => key(ev, n.id)}>
-          <title>{targets[n.id]!.title}</title>
-          {@render nodeBody(n.id)}
-        </g>
-      {:else}
-        <g>{@render nodeBody(n.id)}</g>
+      {#if selectedAction && selected?.host === g.host}
+        <div class="confirm">
+          <p class="small"><strong>{selectedAction.title}</strong> — {selectedAction.explain}</p>
+          {#if selectedAction.also}
+            <label class="small"><input type="checkbox" bind:checked={also} /> {selectedAction.also.label}</label>
+          {/if}
+          <div class="actions">
+            <button class="primary" onclick={confirm} disabled={busy}>Confirm</button>
+            <button onclick={() => (selected = null)}>Cancel</button>
+          </div>
+        </div>
       {/if}
-    {/each}
-  </svg>
+    </figure>
+  {/each}
 </div>
 
-{#if selectedAction}
-  <div class="confirm">
-    <p class="small"><strong>{selectedAction.title}</strong> — {selectedAction.explain}</p>
-    {#if selectedAction.also}
-      <label class="small"><input type="checkbox" bind:checked={also} /> {selectedAction.also.label}</label>
-    {/if}
-    <div class="actions">
-      <button class="primary" onclick={confirm} disabled={busy}>Confirm</button>
-      <button onclick={() => (selected = null)}>Cancel</button>
-    </div>
-  </div>
-{/if}
-
 <ul class="paths">
-  {#each hostPaths as h (h.host)}
-    <li>
-      <span class="dot {h.state}"></span>
-      <span class="mono host">{h.host}</span>
-      <span class="small">{pathWords(h)}</span>
-      {#if h.state === 'observed'}
-        <span class="subtle small">observed {ago(h.trace?.checkedAt)}</span>
-      {:else}
-        <span class="subtle small">inferred from the routes</span>
-      {/if}
-    </li>
-  {/each}
   {#if routing.boxCert}
     <li>
       <span class="dot neutral"></span>
@@ -569,7 +591,7 @@
 <p class="subtle small legend">
   <span class="key observed"></span> observed: requested from this box through public DNS, as a visitor would
   · <span class="key inferred"></span> inferred from the routes
-  · <span class="key idle"></span> not in use{Object.keys(targets).length ? ' (click a highlighted grey part to switch to it)' : ''}
+  · <span class="key idle"></span> not in use{anyTargets ? ' (click a highlighted grey part to switch to it)' : ''}
   {#if blockedList.length}
     · <span class="key unavailable"></span> unavailable: {blockedList.map(([what, why]) => `${what.toLowerCase()} — ${why}`).join('; ')}
   {/if}
@@ -585,6 +607,26 @@
     max-width: 980px;
     margin: 0 auto;
     font-family: var(--font-sans);
+  }
+  svg.defs {
+    position: absolute;
+    overflow: hidden;
+  }
+  figure {
+    margin: 0;
+  }
+  figure + figure {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+  }
+  figcaption {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem 0.5rem;
+    margin-bottom: 0.4rem;
+    min-width: 0;
   }
   .n {
     stroke-width: 1.5;
