@@ -12,7 +12,7 @@ import (
 
 func TestSslipHosts(t *testing.T) {
 	labels := map[string]string{
-		"caddy_0":               "app-1-2-3-4.nip.io",
+		"caddy_0":               "app-1-2-3-4.ip.nsl.sh",
 		"caddy_2":               "app-1-2-3-4.sslip.io",
 		"caddy":                 "https://Other-1-2-3-4.sslip.io:443, api.x-1-2-3-4.sslip.io",
 		"caddy_2.reverse_proxy": "{{upstreams 80}}",

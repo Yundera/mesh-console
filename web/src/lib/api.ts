@@ -57,10 +57,10 @@ export interface Overview {
   publicIpv6: string
   publicIpMode: 'egress' | 'interface' | string
   ipDash: string
-  /** IP_ZONE: the box's IP names are <ipDash>.<ipZone>; empty = <ipDash>.nip.io */
+  /** IP_ZONE: the box's IP names are <ipDash>.<ipZone>; empty = misconfigured, no direct route */
   ipZone?: string
   email: string
-  links: { root: string; maison: string; dashboard?: string; sslip?: string; ipName?: string; nip?: string }
+  links: { root: string; maison: string; dashboard?: string; sslip?: string; ipName?: string }
   backendError: string
 }
 
@@ -250,7 +250,7 @@ export interface DomainInfo {
   domain: string
   primaryForm?: PrimaryForm
   ipDash: string
-  /** IP_ZONE: the box's IP names are <ipDash>.<ipZone>; empty = <ipDash>.nip.io */
+  /** IP_ZONE: the box's IP names are <ipDash>.<ipZone>; empty = misconfigured, no direct route */
   ipZone?: string
   publicIp: string
   defaultHost: string

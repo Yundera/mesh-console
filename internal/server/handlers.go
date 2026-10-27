@@ -29,10 +29,9 @@ type links struct {
 	Maison    string `json:"maison"`
 	Dashboard string `json:"dashboard,omitempty"`
 	Sslip     string `json:"sslip,omitempty"`
-	// IPName is <ip>.<IP_ZONE> (mesh CA); Nip the <ip>.nip.io it replaces on a box
-	// without IP_ZONE (FOSS).
+	// IPName is <ip>.<IP_ZONE> (mesh CA); absent on a box without IP_ZONE, which is
+	// misconfigured (no nip.io fallback).
 	IPName string `json:"ipName,omitempty"`
-	Nip    string `json:"nip,omitempty"`
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
@@ -61,8 +60,6 @@ func (s *Server) overviewData(ctx context.Context, env meshenv.Env) map[string]a
 		l.Sslip = "https://" + ipDash + ".sslip.io"
 		if zone := env.Get("IP_ZONE"); zone != "" {
 			l.IPName = "https://" + ipDash + "." + zone
-		} else {
-			l.Nip = "https://" + ipDash + ".nip.io"
 		}
 	}
 	return map[string]any{

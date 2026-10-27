@@ -7,7 +7,7 @@ import (
 )
 
 func agentDomain(scheme string) backend.Route {
-	return backend.Route{IP: "203.0.113.5", Port: 443, Priority: 1, Source: "agent", Scheme: scheme, Type: "domain", Domain: "203-0-113-5.nip.io"}
+	return backend.Route{IP: "203.0.113.5", Port: 443, Priority: 1, Source: "agent", Scheme: scheme, Type: "domain", Domain: "203-0-113-5.ip.nsl.sh"}
 }
 
 func tunnel(scheme string) backend.Route {
@@ -42,7 +42,7 @@ func TestInfer(t *testing.T) {
 		},
 		{
 			"missing priority sorts last",
-			[]backend.Route{{Source: "agent", Scheme: "https", Type: "domain", Domain: "x.nip.io"}, tunnel("https")},
+			[]backend.Route{{Source: "agent", Scheme: "https", Type: "domain", Domain: "x.ip.nsl.sh"}, tunnel("https")},
 			500, ModeTunnel, ModeTunnel, ModeDirect,
 		},
 		{

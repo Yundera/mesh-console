@@ -40,8 +40,7 @@ func (s *Server) handleCertificates(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	out := map[string]any{"snapshotAt": now.UTC(), "ipZone": env.Get("IP_ZONE")}
 
-	// The mesh CA certificate behind the box domain and its IP names (*.<IP_ZONE>,
-	// or *.nip.io without IP_ZONE).
+	// The mesh CA certificate behind the box domain and its IP names (*.<IP_ZONE>).
 	if c, err := probe.AgentCert(s.cfg.MeshDir); err != nil {
 		out["gatewayError"] = err.Error()
 	} else {

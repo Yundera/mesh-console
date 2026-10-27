@@ -115,7 +115,10 @@
           <dt>Direct (Let’s Encrypt)</dt>
           <dd class="mono">{info.ipDash}.sslip.io</dd>
           <dt>Direct (mesh CA)</dt>
-          <dd class="mono">{info.ipDash}.{info.ipZone || 'nip.io'}</dd>
+          <dd class="mono">
+            {#if info.ipZone}{info.ipDash}.{info.ipZone}{:else}<Pill tone="bad">IP_ZONE unset</Pill>
+              <span class="subtle small">no direct route: run the self-check, which takes it from the mesh server</span>{/if}
+          </dd>
         {/if}
         <dt>Root domain serves</dt>
         <dd class="mono">{info.defaultHost}:{info.defaultPort}</dd>

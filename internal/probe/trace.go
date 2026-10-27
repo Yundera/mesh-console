@@ -29,7 +29,7 @@ type Lane string
 
 const (
 	LaneBoxDirect     Lane = "box-direct"     // straight to the box
-	LaneEdgeDirect    Lane = "edge-direct"    // worker → box by name (ip.<zone>, sslip.io, nip.io)
+	LaneEdgeDirect    Lane = "edge-direct"    // worker → box by name (ip.<zone>, sslip.io)
 	LaneGatewayAgent  Lane = "gateway-agent"  // gateway → box's public IP (agent route)
 	LaneGatewayTunnel Lane = "gateway-tunnel" // gateway → WireGuard tunnel
 	LaneUnknown       Lane = "unknown"

@@ -5,8 +5,8 @@
   import { ago, dateTime } from '../lib/format'
 
   let data = $state<Certificates | null>(null)
-  // The suffix of the box's IP names, behind the mesh certificate (nip.io without IP_ZONE)
-  const ipSuffix = $derived(data?.ipZone || 'nip.io')
+  // The box's IP names, behind the mesh certificate (none without IP_ZONE: misconfigured)
+  const ipNames = $derived(data?.ipZone ? `.${data.ipZone}` : 'IP-zone (IP_ZONE unset)')
   let error = $state('')
   let loading = $state(false)
 
@@ -59,7 +59,7 @@
       <button onclick={load} disabled={loading}>{loading ? 'Checking…' : 'Check again'}</button>
     {/snippet}
     <p class="subtle small intro">
-      Your box answers on three kinds of address. Your domain and the <span class="mono">.{ipSuffix}</span> addresses
+      Your box answers on three kinds of address. Your domain and the <span class="mono">{ipNames}</span> addresses
       use the mesh certificate, which the mesh server issues and trusts. The <span class="mono">.sslip.io</span>
       addresses get a certificate from Let's Encrypt, so they work in any browser even when the mesh is down. If
       Let's Encrypt refuses, Caddy serves a fallback certificate instead, and browsers show a warning on that
@@ -99,7 +99,7 @@
         {@const g = data.gateway}
         <dl class="kv">
           <dt>Covers</dt>
-          <dd>Your domain and the <span class="mono">.{ipSuffix}</span> addresses <span class="subtle small">({g.dnsNames?.length ?? 0} names)</span></dd>
+          <dd>Your domain and the <span class="mono">{ipNames}</span> addresses <span class="subtle small">({g.dnsNames?.length ?? 0} names)</span></dd>
           <dt>Issued by</dt>
           <dd>{g.issuer || '—'}</dd>
           <dt>Validity</dt>
