@@ -101,7 +101,7 @@ func (e Env) Provider() (Provider, error) {
 // ensure-route-registered.sh (`$url/router/api`).
 func (p Provider) APIBase() string { return p.BackendURL + "/router/api" }
 
-// Dash turns an IP into the form used in sslip.io / nip.io hostnames, exactly
+// Dash turns an IP into the form used in ip.<zone> / sslip.io hostnames, exactly
 // as ensure-public-ip.sh derives PUBLIC_IP_DASH.
 func Dash(ip string) string {
 	return strings.NewReplacer(".", "-", ":", "-").Replace(ip)
