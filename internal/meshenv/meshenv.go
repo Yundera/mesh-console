@@ -71,8 +71,10 @@ func (e Env) Get(keys ...string) string {
 }
 
 // Provider is the parsed PROVIDER_STR: `<backend_url>,<userid>,<signature>`.
-// The signature is deliberately dropped: the console only makes the backend's
-// unauthenticated GETs, and never holding it means no handler can leak it.
+// The signature is deliberately not part of it: most of the console only makes the
+// backend's unauthenticated GETs, and a Provider can be logged or serialized
+// without leaking it. The one signed call (mail forwarding) reads it with
+// Env.Signature.
 type Provider struct {
 	BackendURL string
 	UserID     string
@@ -95,6 +97,17 @@ func (e Env) Provider() (Provider, error) {
 		return Provider{}, errors.New("PROVIDER_STR is missing the backend URL or user id")
 	}
 	return p, nil
+}
+
+// Signature is the third field of PROVIDER_STR: the box's signature over its user
+// id, the credential of the backend's signed calls. Only the mail forwarding calls
+// (backend.Client.MailForward*) use it; it never goes into a response or a log.
+func (e Env) Signature() (string, error) {
+	parts := strings.Split(e.Get("PROVIDER_STR", "PROVIDER"), ",")
+	if len(parts) != 3 || strings.TrimSpace(parts[2]) == "" {
+		return "", errors.New("PROVIDER_STR carries no signature")
+	}
+	return strings.TrimSpace(parts[2]), nil
 }
 
 // APIBase is where mesh-router-backend's router API lives, matching

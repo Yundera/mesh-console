@@ -48,10 +48,16 @@ garbage line
 	if p, _ := env.Provider(); p.UserID != "uid9" {
 		t.Fatalf("PROVIDER_STR should win, got %+v", p)
 	}
+	if sig, err := env.Signature(); err != nil || sig != "s" {
+		t.Fatalf("signature = %q %v", sig, err)
+	}
 	env["PROVIDER_STR"] = "bad"
 	env["PROVIDER"] = ""
 	if _, err := env.Provider(); err == nil {
 		t.Fatal("expected error for malformed provider")
+	}
+	if _, err := env.Signature(); err == nil {
+		t.Fatal("expected no signature for a malformed provider")
 	}
 }
 

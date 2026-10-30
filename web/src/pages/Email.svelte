@@ -1,6 +1,7 @@
 <script lang="ts">
   import Card from '../lib/Card.svelte'
   import Pill from '../lib/Pill.svelte'
+  import MailForwardCard from '../lib/MailForwardCard.svelte'
   import { api, type MailInfo, type MailEvent } from '../lib/api'
   import { ago, dateTime } from '../lib/format'
 
@@ -110,6 +111,10 @@
         <dd><span class="mono">&lt;appname&gt;@{info.serverDomain || 'example.com'}</span> <span class="subtle small">— only the name is kept</span></dd>
       </dl>
     </Card>
+
+    <div class="wide">
+      <MailForwardCard />
+    </div>
 
     <div class="wide">
       <Card title="Test">

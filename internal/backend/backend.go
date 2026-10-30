@@ -1,6 +1,6 @@
-// Package backend is a client for the mesh-router-backend GETs the console
-// reads. All of them are unauthenticated (RouterAPI.ts), so no credential is
-// ever sent from here.
+// Package backend is a client for the mesh-router-backend calls the console
+// makes. All are unauthenticated GETs (RouterAPI.ts) except mail forwarding
+// (mailforward.go), which carries the box's signature.
 package backend
 
 import (

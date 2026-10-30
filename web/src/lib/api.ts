@@ -44,6 +44,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const api = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body ?? {}),
+  delete: <T>(path: string) => request<T>('DELETE', path),
 }
 
 // ---- response shapes (mirror internal/server/handlers.go) ----------------
@@ -351,6 +352,20 @@ export interface MailInfo {
   relayState?: string
   stats?: MailStats
   statsError?: string
+}
+
+/** GET|POST|DELETE /api/mail/forward (internal/server/mailforward.go). */
+export interface MailForward {
+  /** false: the mesh server predates mail forwarding; `message` says so */
+  supported: boolean
+  message?: string
+  /** false: the mesh server receives no mail at all */
+  enabled?: boolean
+  address?: string
+  state?: 'off' | 'pending' | 'active' | 'paused'
+  target?: string
+  /** why `paused` */
+  reason?: string
 }
 
 export type CertStatus = 'letsencrypt' | 'fallback' | 'unreachable'
