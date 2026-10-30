@@ -1,6 +1,7 @@
 <script lang="ts">
   import Card from '../lib/Card.svelte'
   import Pill from '../lib/Pill.svelte'
+  import UsageReportCard from '../lib/UsageReportCard.svelte'
   import { api, type Status, type Level } from '../lib/api'
   import { ago } from '../lib/format'
   import { navigate } from '../lib/nav'
@@ -110,6 +111,10 @@
         </div>
       </a>
     {/each}
+  </div>
+
+  <div class="below">
+    <UsageReportCard />
   </div>
 {/if}
 
@@ -251,5 +256,8 @@
   }
   .small {
     font-size: 0.8rem;
+  }
+  .below {
+    margin-top: 1rem;
   }
 </style>

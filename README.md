@@ -6,7 +6,7 @@ Served at `mesh-console-${DOMAIN}`, behind an AppShield gate, admins only.
 
 | Page | Shows | Acts |
 |---|---|---|
-| **Overview** | Domain, public IP, one verdict (**All good / Needs attention / Not working**) and four tiles — internet access, updates, services, email — with plain-language issues. Computed server-side by `internal/status` (`GET /api/status`) | — |
+| **Overview** | Domain, public IP, one verdict (**All good / Needs attention / Not working**) and four tiles — internet access, updates, services, email — with plain-language issues. Computed server-side by `internal/status` (`GET /api/status`). **Usage reporting** card: on/off, where reports go, the apps collected today and when they were last sent (`GET /api/usage-report`) | Turn usage reporting on / off |
 | **Email** | Where app mail goes and the address it is sent as (`<app>.<domainName>@<serverDomain>`); SMTP settings for apps; activity (sent / failed / not delivered, per app, recent) read from the mail relay | **Send a test email** — always to the account `EMAIL`, at most one a minute |
 | **Update** | Installed template commit vs latest on the `UPDATE_URL` branch; auto-update / cron settings; last self-check runs step by step; raw log | **Update now** = run the self-check |
 | **Domain** | Domain, its `ip.<zone>` / sslip.io names (flags a missing `IP_ZONE`), root-domain default app, custom-domain DNS help | Change the default app (container + port) |
@@ -52,6 +52,11 @@ browser ─► mesh-router-caddy ─► mesh-console (AppShield gate, OIDC_REQUI
     unless `confirm` comes first: the console is reached over the path being changed.
     The state is `MESH_ROUTING_FORCE` in `.env` plus `data/routing/force.json`
     (`revertAt`). Exit 75 busy, 76 routing held by a migration (both → HTTP 409).
+  - `tools/set-usage-report.sh on | off`, the Overview page's usage reporting (Caddy's
+    access log → mesh-router-agent → the backend's DAU count). The state is
+    `MESH_USAGE_REPORT` in `.env` (absent = on) plus the agent's `data/usage/state.json`
+    (what it collected and sent). Not locked by `MESH_UPDATES_MANAGED_BY`: the opt-out is
+    the owner's. Exit 75 busy (→ HTTP 409).
 
   A template without a tool gets a read-only page that says why. Each runs as a
   one-shot container `mesh-console-runner` created from this same image with

@@ -108,6 +108,8 @@ func (s *Server) routes(uiFS fs.FS) http.Handler {
 		api.Get("/domain", s.handleDomain)
 		api.Post("/domain/default-app", s.handleSetDefaultApp)
 		api.Post("/domain/primary-form", s.handleSetPrimaryForm)
+		api.Get("/usage-report", s.handleUsageReport)
+		api.Post("/usage-report", s.handleSetUsageReport)
 		api.Get("/certificates", s.handleCertificates)
 		api.Get("/mail", s.handleMail)
 		api.Post("/mail/test", s.handleMailTest)

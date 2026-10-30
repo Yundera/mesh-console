@@ -166,6 +166,24 @@ func TestSetPrimaryForm(t *testing.T) {
 	}
 }
 
+func TestSetUsageReport(t *testing.T) {
+	const scripts = "/DATA/AppData/mesh/scripts"
+	for _, v := range []string{"on", "off"} {
+		verb, err := SetUsageReport(scripts, v)
+		if err != nil || strings.Join(verb.Argv, "|") != "bash|/DATA/AppData/mesh/scripts/tools/set-usage-report.sh|"+v || verb.Detached {
+			t.Fatalf("%s: %+v %v", v, verb, err)
+		}
+	}
+	for _, bad := range []string{"", "On", "true", "off;id", "on off"} {
+		if _, err := SetUsageReport(scripts, bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	if _, err := SetUsageReport("/DATA/$(id)", "on"); err == nil {
+		t.Error("bad scripts dir accepted")
+	}
+}
+
 func TestSetRoutingMode(t *testing.T) {
 	const scripts = "/DATA/AppData/mesh/scripts"
 	v, err := SetRoutingMode(scripts, "tunnel")

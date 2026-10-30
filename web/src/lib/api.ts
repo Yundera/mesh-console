@@ -246,6 +246,32 @@ export interface PrimaryForm {
   blocked?: string
 }
 
+/** One UTC day mesh-router-agent keeps for the usage report. */
+export interface UsageDay {
+  date: string
+  apps: string[]
+  /** apps the backend does not have yet */
+  pending: boolean
+}
+
+/** Usage reporting (the template's MESH_USAGE_REPORT) and what the agent did with it. */
+export interface UsageReport {
+  /** the owner's choice; absent in .env = on */
+  setting: 'on' | 'off'
+  /** backend host the reports go to */
+  destination?: string
+  /** mesh-router-agent's state file; absent until an agent that reports has run */
+  agent?: {
+    enabled: boolean
+    days: UsageDay[]
+    lastSentAt: string | null
+    lastError: string | null
+    updatedAt: string
+  }
+  editable: boolean
+  blocked?: string
+}
+
 export interface DomainInfo {
   domain: string
   primaryForm?: PrimaryForm

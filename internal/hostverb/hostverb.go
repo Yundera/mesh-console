@@ -202,6 +202,25 @@ func SetPrimaryForm(scripts, form string) (Verb, error) {
 	return Verb{Name: "set-primary-form", Argv: []string{"bash", path.Join(scripts, SetPrimaryFormTool), form}}, nil
 }
 
+// SetUsageReportTool is the template's action for usage (DAU) reporting: `on` (Caddy's
+// access log goes to mesh-router-agent, which reports the apps opened per day to the
+// backend) or `off`. The template applies it at once (recreates Caddy and the agent).
+// Exit 0 applied, 2 bad arguments, ExitBusy while a self-check runs, 1 applying failed.
+const SetUsageReportTool = "tools/set-usage-report.sh"
+
+// SetUsageReport turns usage reporting on or off.
+func SetUsageReport(scripts, value string) (Verb, error) {
+	if err := checkRoot(scripts); err != nil {
+		return Verb{}, err
+	}
+	switch value {
+	case "on", "off":
+	default:
+		return Verb{}, fmt.Errorf("unknown usage report value %q", value)
+	}
+	return Verb{Name: "set-usage-report", Argv: []string{"bash", path.Join(scripts, SetUsageReportTool), value}}, nil
+}
+
 var rootRe = regexp.MustCompile(`^/[a-zA-Z0-9/_.-]+$`)
 
 func checkRoot(p string) error {
