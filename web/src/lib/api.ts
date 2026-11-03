@@ -370,11 +370,15 @@ export interface MailForward {
 
 export type CertStatus = 'letsencrypt' | 'fallback' | 'unreachable'
 export type Renewal = 'ok' | 'overdue' | 'expired'
+/** What a name is, which decides who holds its key (internal/certs/certs.go). */
+export type NameKind = 'sslip' | 'dash' | 'dot' | 'apex' | 'ip' | 'other'
 
 export interface CertRow {
   domain: string
+  kind: NameKind
   sources: string[]
-  status: CertStatus
+  /** absent: not probed (dash, ip, other names) */
+  status?: CertStatus
   issuer?: string
   notBefore?: string
   notAfter?: string
@@ -384,11 +388,79 @@ export interface CertRow {
   reasonDetail?: string
 }
 
+export type ZoneState = 'not-delegated' | 'pending' | 'issuing' | 'ok' | 'overdue' | 'expired'
+
+/** The box's apex + dot-name wildcard (internal/certs/zone.go). */
+export interface Zone {
+  domain: string
+  live: boolean | null
+  applied: boolean | null
+  answer?: string
+  apex: BoxCert
+  wildcardHost: string
+  wildcard: BoxCert
+  state: ZoneState
+  reason?: string
+  reasonDetail?: string
+}
+
+/** cert0 (internal/certs/meshcert.go). */
+export interface MeshCert {
+  subject: string
+  issuer: string
+  dnsNames: string[]
+  ips: string[]
+  notBefore: string
+  notAfter: string
+  renewal: Renewal
+  hopName?: string
+  hopOk: boolean
+  ipNames: string[]
+  legacy: string[]
+  other: string[]
+}
+
+export interface CaaAccount {
+  uri: string
+  staging: boolean
+  current: boolean
+  reported: boolean
+}
+
+export interface Caa {
+  delegated: boolean
+  accounts: CaaAccount[]
+  reported: string[]
+  reportedAt?: string
+  issues?: string[]
+  error?: string
+}
+
+export type Holder = 'cloudflare' | 'gateway' | 'box' | 'unknown'
+
+export interface OutsideProbe {
+  host: string
+  kind: NameKind
+  holder?: Holder
+  issuer?: string
+  notAfter?: string
+  verified: boolean
+  error?: string
+}
+
 export interface Certificates {
   snapshotAt: string
   ipZone?: string
-  gateway?: { subject: string; dnsNames: string[]; notBefore: string; notAfter: string; issuer: string; renewal: Renewal }
-  gatewayError?: string
+  sslipRoutes: boolean
+  domain?: string
+  domainName?: string
+  serverDomain?: string
+  backendError?: string
+  zone?: Zone
+  meshCert?: MeshCert
+  meshCertError?: string
+  caa: Caa
+  outside: OutsideProbe[] | null
   certs?: CertRow[]
   error?: string
   logError?: string

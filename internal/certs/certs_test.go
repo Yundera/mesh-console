@@ -10,19 +10,46 @@ import (
 	"time"
 )
 
-func TestSslipHosts(t *testing.T) {
+func TestHosts(t *testing.T) {
 	labels := map[string]string{
 		"caddy_0":               "app-1-2-3-4.ip.nsl.sh",
 		"caddy_2":               "app-1-2-3-4.sslip.io",
 		"caddy":                 "https://Other-1-2-3-4.sslip.io:443, api.x-1-2-3-4.sslip.io",
+		"caddy_3":               "app.alice.nsl.sh app-alice.nsl.sh",
+		"caddy_4":               "{$DOMAIN}",
+		"caddy_5":               "*.alice.nsl.sh",
 		"caddy_2.reverse_proxy": "{{upstreams 80}}",
 		"caddy_0.redir":         "https://redirect-1-2-3-4.sslip.io",
 		"com.docker.compose":    "x-1-2-3-4.sslip.io",
 	}
-	got := SslipHosts(labels)
-	want := []string{"api.x-1-2-3-4.sslip.io", "app-1-2-3-4.sslip.io", "other-1-2-3-4.sslip.io"}
+	got := Hosts(labels)
+	want := []string{"api.x-1-2-3-4.sslip.io", "app-1-2-3-4.ip.nsl.sh", "app-1-2-3-4.sslip.io", "app-alice.nsl.sh", "app.alice.nsl.sh", "other-1-2-3-4.sslip.io"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestKindOf(t *testing.T) {
+	// The labels a wisera app carries (checked 2026-11-03).
+	cases := map[string]Kind{
+		"maison-wisera.inojob.com":           KindDash,
+		"maison-80-241-218-30.ip.inojob.com": KindIP,
+		"maison-80-241-218-30.sslip.io":      KindSslip,
+		"maison.wisera.inojob.com":           KindDot,
+		"a.b.wisera.inojob.com":              KindDot,
+		"wisera.inojob.com":                  KindApex,
+		"Maison-Wisera.inojob.com.":          KindDash,
+		"maison-bob.inojob.com":              KindOther, // another user's dash name
+		"x.maison-wisera.inojob.com":         KindOther,
+		"shop.example.com":                   KindOther,
+	}
+	for h, want := range cases {
+		if got := KindOf(h, "wisera", "inojob.com", "ip.inojob.com"); got != want {
+			t.Errorf("%s: got %s, want %s", h, got, want)
+		}
+	}
+	if got := KindOf("x-1-2-3-4.ip.inojob.com", "wisera", "inojob.com", ""); got != KindOther {
+		t.Errorf("no IP_ZONE: got %s", got)
 	}
 }
 
@@ -109,7 +136,7 @@ func TestLastLinesAndExplain(t *testing.T) {
 	if !strings.Contains(r.Reason, "rate limit") || r.ReasonDetail == "" {
 		t.Fatalf("rate limit: %+v", r)
 	}
-	r = Row{Domain: domains[1], Status: Fallback}
+	r = Row{Domain: domains[1], Status: Fallback, Kind: KindSslip}
 	Explain(&r, l[domains[1]])
 	if !strings.Contains(r.Reason, "ports 80/443") {
 		t.Fatalf("challenge: %+v", r)
@@ -128,5 +155,43 @@ func TestLastLinesAndExplain(t *testing.T) {
 	Explain(&r, "")
 	if r.Reason == "" || r.ReasonDetail != "" {
 		t.Fatalf("no line: %+v", r)
+	}
+}
+
+func TestReasonDNS01(t *testing.T) {
+	cases := []struct {
+		kind Kind
+		line string
+		want string
+	}{
+		{KindDot, `ERROR tls.obtain could not get certificate from issuer {"identifier": "*.alice.nsl.sh", "error": "HTTP 403 urn:ietf:params:acme:error:caa - CAA record for *.alice.nsl.sh prevents issuance"}`, "CAA"},
+		{KindApex, `ERROR tls.obtain could not get certificate {"identifier": "alice.nsl.sh", "error": "[alice.nsl.sh] solving challenges: presenting for challenge: adding temporary record for zone: acmedns: update failed"}`, "DNS-01 challenge through"},
+		{KindDot, `ERROR tls.obtain {"identifier": "*.alice.nsl.sh", "error": "solving challenges: waiting for record to fully propagate: timed out"}`, "did not reach the nameservers"},
+		{KindDot, `ERROR challenge failed {"identifier": "*.alice.nsl.sh", "problem": "urn:ietf:params:acme:error:unauthorized"}`, "DNS-01 challenge failed"},
+		{KindSslip, `ERROR challenge failed {"identifier": "x.sslip.io", "problem": "urn:ietf:params:acme:error:unauthorized"}`, "ports 80/443"},
+		// CAA wins over the HTTP wording on an sslip name too.
+		{KindSslip, `ERROR {"error": "urn:ietf:params:acme:error:caa"}`, "CAA"},
+	}
+	for _, c := range cases {
+		reason, detail := Reason(c.kind, false, c.line)
+		if !strings.Contains(reason, c.want) || detail == "" {
+			t.Errorf("%s %q: got %q", c.kind, c.line, reason)
+		}
+	}
+}
+
+func TestWildcardLogKey(t *testing.T) {
+	keys := []string{"alice.nsl.sh", "*.alice.nsl.sh"}
+	l := LastLines{}
+	l.Add(`ERROR could not get certificate {"identifier": "*.alice.nsl.sh", "error": "x"}`, keys)
+	if _, ok := l["alice.nsl.sh"]; ok {
+		t.Fatal("apex picked up the wildcard's error")
+	}
+	if _, ok := l["*.alice.nsl.sh"]; !ok {
+		t.Fatal("wildcard error missed")
+	}
+	l.Add(`ERROR could not get certificate {"identifier": "app.alice.nsl.sh", "error": "x"}`, keys)
+	if _, ok := l["alice.nsl.sh"]; ok {
+		t.Fatal("apex picked up a dot name's error")
 	}
 }

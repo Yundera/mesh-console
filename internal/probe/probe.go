@@ -58,6 +58,7 @@ func Root(ctx context.Context, caddyHost, domain string) RootDomain {
 type Cert struct {
 	Subject   string    `json:"subject"`
 	DNSNames  []string  `json:"dnsNames"`
+	IPs       []string  `json:"ips,omitempty"`
 	NotBefore time.Time `json:"notBefore"`
 	NotAfter  time.Time `json:"notAfter"`
 	Issuer    string    `json:"issuer"`
@@ -79,5 +80,9 @@ func AgentCert(meshDir string) (*Cert, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Cert{Subject: c.Subject.CommonName, DNSNames: c.DNSNames, NotBefore: c.NotBefore, NotAfter: c.NotAfter, Issuer: c.Issuer.CommonName}, nil
+	ips := make([]string, 0, len(c.IPAddresses))
+	for _, ip := range c.IPAddresses {
+		ips = append(ips, ip.String())
+	}
+	return &Cert{Subject: c.Subject.CommonName, DNSNames: c.DNSNames, IPs: ips, NotBefore: c.NotBefore, NotAfter: c.NotAfter, Issuer: c.Issuer.CommonName}, nil
 }

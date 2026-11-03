@@ -42,6 +42,10 @@ type Config struct {
 	// local routing evidence.
 	TunnelContainer string
 	CaddyHost       string
+	// CaddyDataDir is mesh-router-caddy's /data as mounted here (read-only,
+	// through MeshDir): ACME account files and the zone / CAA state the
+	// Certificates page reads. Empty means ${MeshDir}/data/caddy/data.
+	CaddyDataDir string
 
 	// LogFile is the self-check log as mounted here. Empty means
 	// ${MeshDir}/log/mesh.log (FOSS mesh template); a Yundera PCS writes
@@ -83,6 +87,7 @@ func FromEnv() Config {
 		RunnerImage:       strings.TrimSpace(os.Getenv("RUNNER_IMAGE")),
 		TunnelContainer:   def(os.Getenv("TUNNEL_CONTAINER"), "mesh-router-tunnel"),
 		CaddyHost:         def(os.Getenv("CADDY_HOST"), "mesh-router-caddy"),
+		CaddyDataDir:      strings.TrimSpace(os.Getenv("CADDY_DATA_DIR")),
 		LogFile:           strings.TrimSpace(os.Getenv("LOG_FILE")),
 		TemplateScripts:   strings.TrimSpace(os.Getenv("TEMPLATE_SCRIPTS")),
 		SelfCheckScript:   strings.TrimSpace(os.Getenv("SELF_CHECK_SCRIPT")),
@@ -124,4 +129,12 @@ func (c Config) Scripts() string {
 		return c.TemplateScripts
 	}
 	return path.Join(c.MeshHostRoot, "scripts")
+}
+
+// CaddyData is mesh-router-caddy's /data as mounted in this container.
+func (c Config) CaddyData() string {
+	if c.CaddyDataDir != "" {
+		return c.CaddyDataDir
+	}
+	return path.Join(c.MeshDir, "data", "caddy", "data")
 }
