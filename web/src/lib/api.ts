@@ -396,6 +396,8 @@ export interface Zone {
   live: boolean | null
   applied: boolean | null
   answer?: string
+  /** the gateway passes the apex through (backend probe found a trusted cert); false: it terminates it */
+  apexPassthrough?: boolean
   apex: BoxCert
   wildcardHost: string
   wildcard: BoxCert
@@ -451,6 +453,10 @@ export interface OutsideProbe {
 export interface Certificates {
   snapshotAt: string
   ipZone?: string
+  /** the box's public IP, dashed; empty: no public IP known */
+  ipDash?: string
+  /** which path the Worker and the gateway take to the box (internal/routing) */
+  routing?: Routing['state']
   sslipRoutes: boolean
   domain?: string
   domainName?: string

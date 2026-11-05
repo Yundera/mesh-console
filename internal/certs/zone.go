@@ -35,6 +35,11 @@ type Zone struct {
 	// 1 = DNS-01 issuer); nil when the file is absent (older Caddy image).
 	Applied *bool  `json:"applied"`
 	Answer  string `json:"answer,omitempty"` // direct | gateway (the nameservers' answer)
+	// ApexPassthrough: the gateway passes <domain> through to the box (the
+	// backend's probe found a trusted certificate naming it); false: it
+	// terminates it with its own *.<zone>. nil when the backend runs no user
+	// zones or did not answer.
+	ApexPassthrough *bool `json:"apexPassthrough,omitempty"`
 	// Apex is the certificate served on <domain>; Wildcard the one served on
 	// WildcardHost, a dot name (covered by the *.<domain> site).
 	Apex         Box       `json:"apex"`

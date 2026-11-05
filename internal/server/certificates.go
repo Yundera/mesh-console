@@ -13,6 +13,7 @@ import (
 	"github.com/yundera/mesh-console/internal/certs"
 	"github.com/yundera/mesh-console/internal/meshenv"
 	"github.com/yundera/mesh-console/internal/probe"
+	"github.com/yundera/mesh-console/internal/routing"
 )
 
 // How far back Caddy's log is read for the reason an issuance failed. Caddy
@@ -64,8 +65,15 @@ func (s *Server) handleCertificates(w http.ResponseWriter, r *http.Request) {
 		if res.DNS != nil {
 			live = res.DNS.Live
 			zone.Answer = res.DNS.Answer
+			// The gateway passes the apex through only while the backend's probe
+			// found a trusted certificate naming it (gateway >= 1.14.0).
+			trusted := res.DNS.CertNotAfter != nil
+			zone.ApexPassthrough = &trusted
 		}
 		zone.Live = &live
+		// Which path the Worker and the gateway take to the box: the second leg
+		// of a dash name (Encryption paths on the page).
+		out["routing"] = routing.Infer(res.Routes, res.RoutesTTL)
 	case idErr != nil:
 		out["backendError"] = idErr.Error()
 	}
@@ -100,6 +108,7 @@ func (s *Server) handleCertificates(w http.ResponseWriter, r *http.Request) {
 	if ipDash == "" && env.Get("PUBLIC_IP") != "" {
 		ipDash = meshenv.Dash(env.Get("PUBLIC_IP"))
 	}
+	out["ipDash"] = ipDash
 	if ipDash != "" {
 		root := strings.ToLower(ipDash + ".sslip.io")
 		sources[root] = append(sources[root], certs.RootSource)
