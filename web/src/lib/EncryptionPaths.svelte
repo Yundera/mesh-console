@@ -86,7 +86,8 @@
   <div><span class="swatch box"></span><b>Let's Encrypt, key on your box.</b> A browser trusts it, and only your box can decrypt.</div>
   <div>
     <span class="swatch operator"></span><b>Key held by the mesh</b> (Cloudflare or the mesh gateway). A browser trusts it; the
-    mesh decrypts there.
+    mesh decrypts there. For your dot names the gateway holds a fallback certificate, used only while your box has none of
+    its own, so they never fail in the browser.
   </div>
   <div>
     <span class="swatch mesh"></span><b>Mesh Router CA (cert0).</b> A private CA only the mesh's own machines trust. It secures

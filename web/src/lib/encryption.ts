@@ -2,9 +2,11 @@
 // (Certificates page). Mirrors mesh-router-nameserver/docs/names-and-certificates.md:
 //
 //   dot    <app>.<user>.<zone>   box's Let's Encrypt *.<user>.<zone>; the gateway, when
-//                                 in the path, passes the raw TLS through
+//                                 in the path, passes the raw TLS through. While the
+//                                 box has none, the gateway terminates it with its
+//                                 fallback *.<user>.<zone> (ZeroSSL first)
 //   apex   <user>.<zone>         like dot while the box holds a trusted certificate,
-//                                 else terminated like a dash name
+//                                 else terminated with the gateway's *.<zone>
 //   dash   <app>-<user>.<zone>   terminated by Cloudflare (before the cutoff) or the
 //                                 gateway (after), re-encrypted to the box with cert0
 //   sslip  <app>-<ip>.sslip.io   box's Let's Encrypt certificate (HTTP-01), direct
@@ -55,6 +57,15 @@ export interface Path {
 /** The app whose addresses stand as the example: every box runs it. */
 export const exampleApp = 'mesh-console'
 
+/** The CA of a certificate seen from outside, as a short name ("ZeroSSL ECC DV SSL CA 2 (ZeroSSL GmbH)" → "ZeroSSL"). */
+export function caName(issuer: string | undefined, fallback: string): string {
+  if (!issuer) return fallback
+  if (/zerossl/i.test(issuer)) return 'ZeroSSL'
+  if (/let'?s\s*encrypt/i.test(issuer)) return "Let's Encrypt"
+  if (/google trust/i.test(issuer)) return 'Google Trust Services'
+  return issuer
+}
+
 const BOX: Node = { name: 'Your box', reads: true, box: true }
 const CLOUDFLARE: Node = { name: 'Cloudflare', reads: true }
 const GATEWAY: Node = { name: 'Mesh gateway', reads: true }
@@ -69,9 +80,17 @@ export function buildPaths(d: Certificates): Path[] {
   const delegated = !!z && z.state !== 'not-delegated'
   const dashSeen = d.outside?.find((o) => o.kind === 'dash')
   const dotSeen = d.outside?.find((o) => o.kind === 'dot')
+  const apexSeen = d.outside?.find((o) => o.kind === 'apex')
   // Before the cutoff Cloudflare holds the dash names; the outside handshake says
   // which side answers today.
   const cutoff = dashSeen?.holder === 'gateway'
+  // The gateway's own *.<zone> CA, as seen on a name it terminates (unknown before the cutoff
+  // unless the apex shows it).
+  const gatewayCA = caName(
+    cutoff ? dashSeen?.issuer : apexSeen?.holder === 'gateway' ? apexSeen.issuer : undefined,
+    'Public CA',
+  )
+  const gatewayZoneLeg: Leg = { kind: 'operator', ca: gatewayCA, detail: `*.${zone} · key on the mesh gateway` }
   const workerDirect = r?.worker.mode === 'direct'
   const tunnel = r?.gateway.mode === 'tunnel'
   const offline = r?.mode === 'offline'
@@ -101,7 +120,7 @@ export function buildPaths(d: Certificates): Path[] {
       return {
         who: 'the mesh gateway',
         legs: [
-          { leg: { kind: 'operator', ca: "Let's Encrypt", detail: `*.${zone} · key on the mesh gateway` }, to: GATEWAY },
+          { leg: gatewayZoneLeg, to: GATEWAY },
           { leg: gatewayHop, to: BOX },
         ],
       }
@@ -154,6 +173,24 @@ export function buildPaths(d: Certificates): Path[] {
       p.notes.push(
         'Your domain is not delegated to the mesh nameservers, so your box cannot obtain this certificate. Shown as it will be.',
       )
+    } else if (dotSeen?.holder === 'gateway') {
+      // The gateway's fallback *.<domain>: seen from outside, so it is what visitors get now.
+      p.legs = [
+        {
+          leg: {
+            kind: 'operator',
+            ca: caName(dotSeen.issuer, 'Public CA'),
+            detail: `*.${domain} · fallback, key on the mesh gateway`,
+          },
+          to: GATEWAY,
+        },
+        { leg: gatewayHop, to: BOX },
+      ]
+      p.verdict = 'split'
+      p.verdictText = 'Decrypted by the mesh gateway (fallback)'
+      p.notes.push(
+        `Your box has no trusted certificate for this name yet, so the mesh gateway serves its fallback certificate for *.${domain} and re-encrypts the traffic to your box. This stops as soon as your box holds its own: the gateway then only passes the encrypted connection on.`,
+      )
     } else if (z?.state === 'expired') {
       p.verdict = 'broken'
       p.verdictText = 'Certificate expired'
@@ -163,7 +200,7 @@ export function buildPaths(d: Certificates): Path[] {
       p.notes.push('Your box is obtaining its certificate. Shown as it will be.')
     } else if (through.length) {
       p.notes.push(
-        'The mesh nameservers send visitors through the mesh gateway. It reads only the name in the handshake and forwards the encrypted connection; it holds no certificate for this name.',
+        `The mesh nameservers send visitors through the mesh gateway. It reads only the name in the handshake and forwards the encrypted connection. It also holds a fallback certificate for *.${domain}, which it uses only while your box has none.`,
       )
     }
     if (offline) p.notes.push(offlineNote)
@@ -180,6 +217,7 @@ export function buildPaths(d: Certificates): Path[] {
       verdictText: 'End to end',
       legs: [],
       notes: [],
+      seen: apexSeen,
     }
     if (zoneLive && z?.apexPassthrough !== false) {
       const through = z?.answer === 'gateway' ? [tunnel ? 'Mesh gateway, over WireGuard' : 'Mesh gateway'] : []
@@ -189,7 +227,7 @@ export function buildPaths(d: Certificates): Path[] {
       )
     } else if (delegated) {
       p.legs = [
-        { leg: { kind: 'operator', ca: "Let's Encrypt", detail: `*.${zone} · key on the mesh gateway` }, to: GATEWAY },
+        { leg: gatewayZoneLeg, to: GATEWAY },
         { leg: gatewayHop, to: BOX },
       ]
       p.verdict = 'split'

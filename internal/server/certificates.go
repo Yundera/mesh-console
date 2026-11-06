@@ -221,9 +221,28 @@ func (s *Server) handleCertificates(w http.ResponseWriter, r *http.Request) {
 		out["zone"] = zone
 	}
 
-	// The dot name from outside, once the box serves its own certificate.
-	if zone.State == certs.ZoneOK || zone.State == certs.ZoneOverdue {
-		addOutside(certs.ProbeOutside(ctx, outsideProbeApp+"."+domain, certs.KindDot, serverDomain))
+	// The dot name and the apex from outside, once the zone is delegated: served
+	// by the box's own certificate, or by the gateway's (its fallback for dot
+	// names, its *.<zone> for the apex) while the box has none.
+	if domain != "" && delegated {
+		var ow sync.WaitGroup
+		for _, p := range []struct {
+			host string
+			kind certs.Kind
+			box  certs.Box
+		}{
+			{outsideProbeApp + "." + domain, certs.KindDot, zone.Wildcard},
+			{domain, certs.KindApex, zone.Apex},
+		} {
+			ow.Add(1)
+			go func() {
+				defer ow.Done()
+				o := certs.ProbeOutside(ctx, p.host, p.kind, serverDomain)
+				o.AgainstBox(p.box)
+				addOutside(o)
+			}()
+		}
+		ow.Wait()
 	}
 	sort.Slice(outside, func(i, j int) bool { return outside[i].Kind < outside[j].Kind })
 	out["outside"] = outside

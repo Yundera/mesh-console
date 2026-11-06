@@ -16,9 +16,12 @@ type Holder string
 
 const (
 	HolderCloudflare Holder = "cloudflare" // Cloudflare's edge (dash names before the cutoff)
-	HolderGateway    Holder = "gateway"    // the mesh gateway's own *.<zone> (dash names after the cutoff)
-	HolderBox        Holder = "box"        // this box's own Let's Encrypt certificate
-	HolderUnknown    Holder = "unknown"
+	// HolderGateway: the mesh gateway, with its own *.<zone> (dash names after the
+	// cutoff, the apex while the box has no trusted certificate) or its fallback
+	// *.<user>.<zone> (dot names while the box has none, phase-1.1-gateway-tls.md §6.3)
+	HolderGateway Holder = "gateway"
+	HolderBox     Holder = "box" // this box's own Let's Encrypt certificate
+	HolderUnknown Holder = "unknown"
 )
 
 // Outside is one handshake made like a visitor's: public DNS, port 443,
@@ -39,13 +42,26 @@ type Outside struct {
 
 // Cloudflare's edge certificates come from several CAs (Google Trust Services,
 // Let's Encrypt, SSL.com) and say so nowhere in the issuer; the leaf is
-// recognised by its Cloudflare issuer when there is one, else by its SANs
-// (edge certs carry the zone apex + *.zone, a box cert carries only its own names).
+// recognised by its Cloudflare issuer when there is one, else by its SANs.
+// The CA alone tells nothing: the gateways order from ZeroSSL first and Let's
+// Encrypt as a backup, and Cloudflare uses Let's Encrypt too.
 var cloudflareIssuer = regexp.MustCompile(`(?i)cloudflare`)
+
+// The Mesh Router CA (cert0): never a browser certificate, so never a holder.
+var meshCAIssuer = regexp.MustCompile(`(?i)mesh router`)
 
 // HolderOf decides who holds the key of leaf, served on host of kind k.
 // serverDomain is the mesh zone (nsl.sh).
-func HolderOf(leaf *x509.Certificate, k Kind, serverDomain string) Holder {
+//
+//   - *.<zone> on a dash name or the apex: Cloudflare's edge when it also names
+//     the zone apex (Universal SSL always does), else the gateway's own
+//     (lego orders *.<zone> alone).
+//   - a certificate naming host itself (*.<user>.<zone>, <user>.<zone>): the
+//     box's when Let's Encrypt issued it (boxes order nowhere else), else the
+//     gateway's fallback (ZeroSSL). The gateway's Let's Encrypt backup looks like
+//     the box's; the caller tells them apart with the box's own certificate
+//     (Outside.AgainstBox).
+func HolderOf(leaf *x509.Certificate, k Kind, host, serverDomain string) Holder {
 	if leaf == nil {
 		return HolderUnknown
 	}
@@ -53,28 +69,40 @@ func HolderOf(leaf *x509.Certificate, k Kind, serverDomain string) Holder {
 	if cloudflareIssuer.MatchString(issuer) {
 		return HolderCloudflare
 	}
-	zoneWide := false
+	if meshCAIssuer.MatchString(issuer) {
+		return HolderUnknown
+	}
+	zoneWide, zoneApex := false, false
 	for _, n := range leaf.DNSNames {
-		if strings.EqualFold(n, "*."+serverDomain) {
-			zoneWide = true
-		}
+		zoneWide = zoneWide || strings.EqualFold(n, "*."+serverDomain)
+		zoneApex = zoneApex || strings.EqualFold(n, serverDomain)
 	}
 	switch {
-	case k == KindDash && zoneWide && !letsEncrypt.MatchString(issuer):
-		return HolderCloudflare // edge cert from a CA the gateway does not use
-	case k == KindDash && zoneWide:
-		// Both Cloudflare (Universal SSL) and, after the cutoff, the gateway
-		// serve a Let's Encrypt *.<zone>; the edge cert also carries the apex.
-		for _, n := range leaf.DNSNames {
-			if strings.EqualFold(n, serverDomain) {
-				return HolderCloudflare
-			}
+	case zoneWide && (k == KindDash || k == KindApex):
+		if zoneApex {
+			return HolderCloudflare
 		}
 		return HolderGateway
-	case (k == KindDot || k == KindApex) && !zoneWide && letsEncrypt.MatchString(issuer):
-		return HolderBox
+	case zoneWide:
+		return HolderUnknown // *.<zone> covers one label: not a dot name's
+	case (k == KindDot || k == KindApex) && leaf.VerifyHostname(host) == nil:
+		if letsEncrypt.MatchString(issuer) {
+			return HolderBox
+		}
+		return HolderGateway
 	}
 	return HolderUnknown
+}
+
+// AgainstBox corrects a "box" verdict with the certificate the box serves itself
+// (box, from the local handshake): when the box holds no Let's Encrypt
+// certificate, what the internet sees can only be the gateway's (its Let's
+// Encrypt backup fallback). Two different Let's Encrypt certificates stay "box":
+// a renewal the outside has not seen yet is far likelier than the backup.
+func (o *Outside) AgainstBox(box Box) {
+	if o.Holder == HolderBox && box.Kind != "" && box.Kind != BoxLetsEncrypt {
+		o.Holder = HolderGateway
+	}
 }
 
 // ProbeOutside does a visitor's handshake with host:443.
@@ -106,7 +134,7 @@ func ProbeOutsideLeaf(ctx context.Context, host string, k Kind, serverDomain str
 	na := leaf.NotAfter
 	o.NotAfter = &na
 	o.Fingerprint = Fingerprint(leaf)
-	o.Holder = HolderOf(leaf, k, serverDomain)
+	o.Holder = HolderOf(leaf, k, host, serverDomain)
 	return o, leaf
 }
 
