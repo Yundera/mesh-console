@@ -14,6 +14,7 @@
     type ZoneState,
   } from '../lib/api'
   import { ago, dateTime } from '../lib/format'
+  import { navigate } from '../lib/nav'
 
   type Tone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral'
 
@@ -154,6 +155,10 @@
       <p class="subtle">Checking every address… this can take a few seconds.</p>
     {:else}
       <EncryptionPaths {paths} />
+      <p class="small verify">
+        <a href="/certificates/verify" onclick={(e) => navigate(e, '/certificates/verify')}>Check it in your browser →</a>
+        <span class="subtle">compare the certificate behind your browser's padlock with your box's.</span>
+      </p>
       <p class="subtle small">
         Checked {dateTime(data.snapshotAt)}. This is about the network path, not the software on your box, which you install
         and update from its publishers.
@@ -230,6 +235,9 @@
                 {#if item.b.method}&nbsp;· obtained by DNS-01{/if}
                 {#if item.b.kind === 'mesh-ca'}&nbsp;· trusted by the mesh only{/if}
               </div>
+              {#if item.b.fingerprint}
+                <p class="subtle small detail-inline">SHA-256 <span class="mono">{item.b.fingerprint}</span></p>
+              {/if}
               {#if item.b.error}<p class="subtle small mono detail-inline">{item.b.error}</p>{/if}
             </li>
           {/each}
@@ -519,6 +527,12 @@
   }
   .reason {
     margin: 0.35rem 0 0;
+  }
+  .verify {
+    margin: 0.6rem 0 0;
+  }
+  .verify a {
+    font-weight: 600;
   }
   .detail-inline {
     margin: 0.25rem 0 0;

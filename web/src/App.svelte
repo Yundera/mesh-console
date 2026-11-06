@@ -1,24 +1,30 @@
 <script lang="ts">
+  import type { Component } from 'svelte'
   import Overview from './pages/Overview.svelte'
   import Update from './pages/Update.svelte'
   import Domain from './pages/Domain.svelte'
   import Email from './pages/Email.svelte'
   import Certificates from './pages/Certificates.svelte'
+  import VerifyCertificate from './pages/VerifyCertificate.svelte'
   import Diagnostics from './pages/Diagnostics.svelte'
   import Migration from './pages/Migration.svelte'
 
-  const pages = [
+  // A page with a parent is not in the menu; the menu highlights its parent.
+  type Page = { path: string; label: string; component: Component; parent?: string }
+  const pages: Page[] = [
     { path: '/', label: 'Overview', component: Overview },
     { path: '/email', label: 'Email', component: Email },
     { path: '/update', label: 'Update', component: Update },
     { path: '/domain', label: 'Domain', component: Domain },
     { path: '/certificates', label: 'Certificates', component: Certificates },
+    { path: '/certificates/verify', label: 'Verify your certificate', component: VerifyCertificate, parent: '/certificates' },
     { path: '/diagnostics', label: 'Diagnostics', component: Diagnostics },
     { path: '/migration', label: 'Migration', component: Migration },
   ]
 
   let path = $state(location.pathname)
-  const current = $derived(pages.find((p) => p.path === path) ?? pages[0])
+  const current = $derived(pages.find((p) => p.path === path.replace(/\/+$/, '')) ?? pages[0])
+  const menu = pages.filter((p) => !p.parent)
 
   function go(e: MouseEvent, to: string) {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
@@ -45,8 +51,8 @@
       <span>Mesh Console</span>
     </a>
     <nav>
-      {#each pages as p (p.path)}
-        <a href={p.path} class:active={p.path === current.path} onclick={(e) => go(e, p.path)}>{p.label}</a>
+      {#each menu as p (p.path)}
+        <a href={p.path} class:active={p.path === (current.parent ?? current.path)} onclick={(e) => go(e, p.path)}>{p.label}</a>
       {/each}
     </nav>
   </div>

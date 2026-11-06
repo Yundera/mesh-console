@@ -170,6 +170,7 @@ export interface BoxCert {
   method?: string
   notAfter?: string
   renewal?: 'ok' | 'overdue' | 'expired'
+  fingerprint?: string
   error?: string
 }
 
@@ -383,6 +384,8 @@ export interface CertRow {
   notBefore?: string
   notAfter?: string
   renewal?: Renewal
+  /** SHA-256, as browsers print it (AB:CD:…) */
+  fingerprint?: string
   error?: string
   reason?: string
   reasonDetail?: string
@@ -446,8 +449,39 @@ export interface OutsideProbe {
   holder?: Holder
   issuer?: string
   notAfter?: string
+  fingerprint?: string
   verified: boolean
   error?: string
+}
+
+/** The certificate a browser is shown on one address (internal/certs/verify.go). */
+export interface SeenCert {
+  host: string
+  kind: NameKind
+  holder: Holder
+  /** only the box holds the key */
+  endToEnd: boolean
+  /** a browser accepts it without a warning */
+  trusted: boolean
+  issuedTo?: string
+  dnsNames?: string[]
+  issuer?: string
+  notBefore?: string
+  notAfter?: string
+  fingerprint?: string
+  error?: string
+}
+
+/** GET /api/certificates/verify?host= (internal/server/verify.go). */
+export interface CertificateVerify {
+  checkedAt: string
+  domain: string
+  backendError?: string
+  /** the address the page was opened on; absent when it is not one of the box's */
+  address?: SeenCert
+  addressError?: string
+  /** this console's addresses that are encrypted end to end and open without a warning */
+  endToEnd: SeenCert[] | null
 }
 
 export interface Certificates {

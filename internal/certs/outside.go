@@ -29,6 +29,8 @@ type Outside struct {
 	Holder   Holder     `json:"holder,omitempty"`
 	Issuer   string     `json:"issuer,omitempty"`
 	NotAfter *time.Time `json:"notAfter,omitempty"`
+	// Fingerprint is the SHA-256 browsers show in their certificate viewer.
+	Fingerprint string `json:"fingerprint,omitempty"`
 	// Verified: a browser accepts it (chain and name). The handshake is retried
 	// without verification to still show what is served when it is not.
 	Verified bool   `json:"verified"`
@@ -77,6 +79,13 @@ func HolderOf(leaf *x509.Certificate, k Kind, serverDomain string) Holder {
 
 // ProbeOutside does a visitor's handshake with host:443.
 func ProbeOutside(ctx context.Context, host string, k Kind, serverDomain string) Outside {
+	o, _ := ProbeOutsideLeaf(ctx, host, k, serverDomain)
+	return o
+}
+
+// ProbeOutsideLeaf is ProbeOutside that also returns the served leaf (nil when
+// nothing was served).
+func ProbeOutsideLeaf(ctx context.Context, host string, k Kind, serverDomain string) (Outside, *x509.Certificate) {
 	o := Outside{Host: host, Kind: k}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
@@ -87,17 +96,18 @@ func ProbeOutside(ctx context.Context, host string, k Kind, serverDomain string)
 		o.Error = err.Error()
 		var verr *tls.CertificateVerificationError
 		if !errors.As(err, &verr) {
-			return o // nothing was served: DNS, connect or handshake failure
+			return o, nil // nothing was served: DNS, connect or handshake failure
 		}
 		if leaf, err = outsideHandshake(ctx, host, true); err != nil {
-			return o
+			return o, nil
 		}
 	}
 	o.Issuer = issuerName(leaf)
 	na := leaf.NotAfter
 	o.NotAfter = &na
+	o.Fingerprint = Fingerprint(leaf)
 	o.Holder = HolderOf(leaf, k, serverDomain)
-	return o
+	return o, leaf
 }
 
 func outsideHandshake(ctx context.Context, host string, insecure bool) (*x509.Certificate, error) {

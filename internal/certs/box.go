@@ -21,7 +21,9 @@ type Box struct {
 	Method   string     `json:"method,omitempty"` // "dns-01" when that is the only way it can have been issued
 	NotAfter *time.Time `json:"notAfter,omitempty"`
 	Renewal  Renewal    `json:"renewal,omitempty"`
-	Error    string     `json:"error,omitempty"`
+	// Fingerprint is the SHA-256 browsers show in their certificate viewer.
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 type BoxKind string
@@ -49,6 +51,7 @@ func ClassifyBox(domain string, c *x509.Certificate, probeErr error, meshIssuer 
 	na := c.NotAfter
 	b.NotAfter = &na
 	b.Renewal = RenewalOf(c.NotBefore, c.NotAfter, now)
+	b.Fingerprint = Fingerprint(c)
 	for _, n := range c.DNSNames {
 		if strings.EqualFold(n, "*."+domain) {
 			b.Wildcard = true

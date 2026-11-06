@@ -17,6 +17,7 @@ package certs
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -107,6 +108,8 @@ type Row struct {
 	NotBefore *time.Time `json:"notBefore,omitempty"`
 	NotAfter  *time.Time `json:"notAfter,omitempty"`
 	Renewal   Renewal    `json:"renewal,omitempty"`
+	// Fingerprint is the SHA-256 browsers show in their certificate viewer.
+	Fingerprint string `json:"fingerprint,omitempty"`
 	// Error is the handshake error of an unreachable address.
 	Error string `json:"error,omitempty"`
 	// Reason is a plain-language cause when the address is not on a Let's
@@ -191,11 +194,30 @@ func Classify(row *Row, c *x509.Certificate, probeErr error, now time.Time) {
 	nb, na := c.NotBefore, c.NotAfter
 	row.NotBefore, row.NotAfter = &nb, &na
 	row.Renewal = RenewalOf(nb, na, now)
+	row.Fingerprint = Fingerprint(c)
 	if letsEncrypt.MatchString(strings.Join(c.Issuer.Organization, " ")) || letsEncrypt.MatchString(c.Issuer.CommonName) {
 		row.Status = LetsEncrypt
 	} else {
 		row.Status = Fallback
 	}
+}
+
+// Fingerprint is the certificate's SHA-256 as browsers print it in their
+// certificate viewers: upper-case hex pairs joined by colons.
+func Fingerprint(c *x509.Certificate) string {
+	if c == nil {
+		return ""
+	}
+	sum := sha256.Sum256(c.Raw)
+	const hexDigits = "0123456789ABCDEF"
+	b := make([]byte, 0, len(sum)*3-1)
+	for i, v := range sum {
+		if i > 0 {
+			b = append(b, ':')
+		}
+		b = append(b, hexDigits[v>>4], hexDigits[v&0xf])
+	}
+	return string(b)
 }
 
 // issuerName is "R11 (Let's Encrypt)" / "Caddy Local Authority - ECC Intermediate".

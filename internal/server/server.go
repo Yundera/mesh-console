@@ -111,6 +111,7 @@ func (s *Server) routes(uiFS fs.FS) http.Handler {
 		api.Get("/usage-report", s.handleUsageReport)
 		api.Post("/usage-report", s.handleSetUsageReport)
 		api.Get("/certificates", s.handleCertificates)
+		api.Get("/certificates/verify", s.handleCertificateVerify)
 		api.Get("/mail", s.handleMail)
 		api.Post("/mail/test", s.handleMailTest)
 		api.Get("/mail/forward", s.handleMailForward)
